@@ -1,0 +1,25 @@
+{
+  "object_kind": "merge_request",
+  "project": {
+    "id": 1234,
+    "name": "demo-service",
+    "web_url": "http://192.168.2.50/demo/demo-service"
+  },
+  "object_attributes": {
+    "id": 888,
+    "iid": 42,
+    "state": "opened",
+    "action": "open",
+    "source_branch": "feature/new-api",
+    "target_branch": "main",
+    "title": "Update API integration",
+    "url": "http://192.168.2.50/demo/demo-service/-/merge_requests/42"
+  },
+  "changes": [
+    {
+      "old_path": "src/api.py",
+      "new_path": "src/api.py",
+      "diff": "@@ -10,3 +10,4 @@\n def get_data():\n-    return db.query('SELECT * FROM users')\n+    user_id = request.args.get('id')\n+    return db.query(f'SELECT * FROM users WHERE id = {user_id}')"
+    }
+  ]
+}

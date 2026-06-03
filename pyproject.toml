@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "devops-brain"
+version = "0.1.0"
+description = "智能研发运维多 Agent 协作平台 (代码审查单场景)"
+authors = ["AI <ai@example.com>"]
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "^0.110.0"
+uvicorn = "^0.27.0"
+langgraph = "^0.0.30"
+litellm = "^1.30.0"
+pydantic = "^2.6.0"
+langfuse = "^2.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.0.3,<10.0.0)",
+    "pytest-asyncio (>=1.4.0,<2.0.0)",
+    "httpx (>=0.28.1,<0.29.0)"
+]

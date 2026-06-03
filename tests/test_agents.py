@@ -1,0 +1,61 @@
+import json
+from unittest.mock import patch
+from src.agents.quality import quality_agent
+from src.agents.security import security_agent
+from src.agents.architecture import architecture_agent
+from src.agents import parse_agent_json
+
+def mock_call_llm_success(prompt: str, agent_name: str, model: str = None) -> str:
+    """模拟大模型成功返回 markdown 格式的 JSON"""
+    mock_res = {
+        "agent": agent_name,
+        "issues": [{"description": f"Mock issue from {agent_name}"}],
+        "risk": "LOW"
+    }
+    return f"```json\n{json.dumps(mock_res)}\n```"
+
+def mock_call_llm_fail(prompt: str, agent_name: str, model: str = None) -> str:
+    """模拟大模型返回无效的乱码"""
+    return "This is not a JSON, sorry!"
+
+def test_parse_agent_json():
+    # 测试正确的 markdown json
+    valid_markdown = "```json\n{\"agent\": \"test\", \"risk\": \"LOW\"}\n```"
+    res = parse_agent_json(valid_markdown, "test")
+    assert res["risk"] == "LOW"
+
+    # 测试无代码块的 json
+    valid_json = "{\"agent\": \"test\", \"risk\": \"HIGH\"}"
+    res2 = parse_agent_json(valid_json, "test")
+    assert res2["risk"] == "HIGH"
+
+    # 测试乱码 fallback
+    invalid = "Hello world"
+    res3 = parse_agent_json(invalid, "test")
+    assert res3["risk"] == "MEDIUM"
+    assert "error" in res3
+
+@patch("src.agents.quality.call_llm", side_effect=mock_call_llm_success)
+def test_quality_agent_success(mock_llm):
+    state = {"diff_content": "def foo(): pass"}
+    res = quality_agent(state)
+    reviews = res["reviews"]
+    assert len(reviews) == 1
+    assert reviews[0]["agent"] == "quality"
+    assert reviews[0]["risk"] == "LOW"
+
+@patch("src.agents.security.call_llm", side_effect=mock_call_llm_fail)
+def test_security_agent_fallback(mock_llm):
+    state = {"diff_content": "SELECT * FROM users"}
+    res = security_agent(state)
+    reviews = res["reviews"]
+    assert len(reviews) == 1
+    assert reviews[0]["agent"] == "security"
+    assert reviews[0]["risk"] == "MEDIUM"
+    assert "error" in reviews[0]
+
+@patch("src.agents.architecture.call_llm", side_effect=mock_call_llm_success)
+def test_architecture_agent_success(mock_llm):
+    state = {"diff_content": "class A: pass"}
+    res = architecture_agent(state)
+    assert res["reviews"][0]["agent"] == "architecture"
