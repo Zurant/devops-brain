@@ -8,25 +8,7 @@ from src.agents.orchestrator import orchestrator
 from src.agents.quality import quality_agent
 from src.agents.security import security_agent
 from src.agents.architecture import architecture_agent
-
-def summary_agent(state: ReviewState):
-    """
-    汇总与风险评级
-    """
-    reviews = state.get("reviews", [])
-    risks = [r.get("risk", "LOW") for r in reviews]
-    
-    final_risk = "LOW"
-    if "HIGH" in risks:
-        final_risk = "HIGH"
-    elif "MEDIUM" in risks:
-        final_risk = "MEDIUM"
-        
-    return {
-        "final_risk_level": final_risk,
-        "summary_report": "Phase 1 Mock Summary",
-        "final_comment": "Mock final comment"
-    }
+from src.agents.summary import summary_agent
 
 def human_review(state: ReviewState):
     """

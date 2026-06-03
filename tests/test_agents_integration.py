@@ -1,6 +1,9 @@
 import json
 import os
+from dotenv import load_dotenv
 from src.agents.security import security_agent
+
+load_dotenv()
 
 # 集成测试：必须在带有有效 OPENAI API KEY 或 LOCAL LM 的环境下运行
 # 运行方式：python -m pytest tests/test_agents_integration.py -v -s
@@ -13,11 +16,11 @@ def test_security_agent_real_llm():
         
     # 读取 mock_mr_payload.json 中的 diff (如果文件存在)
     # 简单起见，我们直接给一段包含 SQL 注入风险的代码
-    payload_diff = \"\"\"
+    payload_diff = """
     def get_user(db, user_id):
         query = f"SELECT * FROM users WHERE id = {user_id}"
         return db.execute(query)
-    \"\"\"
+    """
     
     state = {"diff_content": payload_diff}
     print(f"\n--- Sending diff to REAL LLM (Security Agent) ---")

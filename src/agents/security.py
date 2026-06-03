@@ -21,5 +21,8 @@ def security_agent(state: ReviewState):
     diff = state.get("diff_content", "")
     prompt = PROMPT_TEMPLATE.replace("{diff_content}", diff)
     response_text = call_llm(prompt, agent_name="security")
+    print("\n--- RAW LLM RESPONSE ---")
+    print(response_text)
+    print("------------------------\n")
     result = parse_agent_json(response_text, "security")
     return {"reviews": [result]}

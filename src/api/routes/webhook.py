@@ -32,16 +32,24 @@ async def handle_webhook(request: Request):
     # 启动图
     graph.invoke(initial_state, config=config)
     
+    from src.tools.gitlab_client import post_mr_comment
+    
     # 检查状态是否中断
     state = graph.get_state(config)
     if state.next and ("human_review" in state.next or "summary:edges" in state.next):
         # 进入 pending 状态
         current_values = state.values
         pending_reviews[thread_id] = {
-            "mr_url": mr_url,
-            "risk_level": current_values.get("final_risk_level"),
-            "summary_report": current_values.get("summary_report")
+            "mr_id": current_values.get("mr_id"),
+            "project_id": current_values.get("project_id"),
+            "mr_url": current_values.get("mr_url"),
+            "final_risk_level": current_values.get("final_risk_level"),
+            "summary_report": current_values.get("summary_report"),
+            "final_comment": current_values.get("final_comment")
         }
-        return {"status": "pending_human_review", "thread_id": thread_id}
-        
-    return {"status": "completed", "thread_id": thread_id}
+        return {"status": "paused", "thread_id": thread_id}
+    else:
+        # LOW risk，图正常结束，执行回写
+        current_values = state.values
+        post_mr_comment(current_values.get("project_id", "mock"), current_values.get("mr_id", "mock"), current_values.get("final_comment", ""))
+        return {"status": "completed", "thread_id": thread_id}

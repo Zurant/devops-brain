@@ -3,6 +3,10 @@ import time
 import json
 import litellm
 
+if os.getenv("LANGFUSE_PUBLIC_KEY"):
+    litellm.success_callback = ["langfuse"]
+    litellm.failure_callback = ["langfuse"]
+
 def call_llm(prompt: str, agent_name: str = "unknown", model: str = None) -> str:
     """
     统一的 LLM 调用入口。
@@ -34,7 +38,8 @@ def call_llm(prompt: str, agent_name: str = "unknown", model: str = None) -> str
             model=model,
             messages=[{"role": "user", "content": prompt}],
             api_base=api_base,
-            api_key=api_key
+            api_key=api_key,
+            metadata={"generation_name": f"devops-brain-{agent_name}"}
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -45,7 +50,8 @@ def call_llm(prompt: str, agent_name: str = "unknown", model: str = None) -> str
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 api_base=api_base,
-                api_key=api_key
+                api_key=api_key,
+                metadata={"generation_name": f"devops-brain-{agent_name}"}
             )
             return response.choices[0].message.content
         except Exception:
