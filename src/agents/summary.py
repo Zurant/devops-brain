@@ -19,6 +19,11 @@ PROMPT_TEMPLATE = """
 def summary_agent(state: ReviewState):
     reviews = state.get("reviews", [])
     reviews_str = json.dumps(reviews, ensure_ascii=False, indent=2)
+    
+    print("\n=== [DEBUG] 汇聚到 Summary Agent 的所有专家 Reviews ===")
+    print(reviews_str)
+    print("========================================================\n")
+    
     prompt = PROMPT_TEMPLATE.replace("{reviews_json}", reviews_str)
     
     response_text = call_llm(prompt, agent_name="summary")

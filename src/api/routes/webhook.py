@@ -14,10 +14,9 @@ async def handle_webhook(request: Request):
     project_id = str(payload.get("project", {}).get("id", "unknown"))
     mr_url = payload.get("object_attributes", {}).get("url", "")
     
-    # 模拟提取 diff
-    diff_content = "mock diff content"
-    if "changes" in payload:
-        diff_content = "\n".join([c.get("diff", "") for c in payload.get("changes", [])])
+    # 拉取真实 diff
+    from src.tools.gitlab_client import get_mr_changes
+    diff_content = get_mr_changes(project_id, mr_id)
     
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
