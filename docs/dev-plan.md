@@ -1,6 +1,13 @@
-# DevOps Brain — 详细开发计划
+# DevOps Brain — MVP 详细开发计划
 
-> **本文档是项目开发的唯一权威计划。** AI 编程助手必须按阶段顺序执行，完成当前阶段的 Done When 判定后，才能进入下一阶段。严禁跨阶段开发。
+> **本文档是 MVP 阶段的权威计划。** MVP 阶段必须按阶段顺序执行，完成当前阶段的 Done When 判定后，才能进入下一阶段。企业化落地阶段的 PostgreSQL、异步任务、审批历史、审计日志、权限模型等规划见 `docs/enterprise-plan.md`。
+
+## 当前结论
+
+- **MVP 功能主链路：已完成。** 当前代码已经跑通「Webhook 触发 -> 多 Agent 并行审查 -> Summary 风险汇总 -> HIGH 风险 HITL 审批 -> Approve/Modify 回写评论、Reject 结束流程」。
+- **MVP 自动化测试：已通过。** 当前基线命令为 `poetry run pytest tests -v`。
+- **MVP 验收材料：待补齐。** 真实 GitLab 回写截图、Langfuse 后台截图、面试话术文档仍需补充。
+- **企业化阶段：尚未开始。** 后续不再受 MVP 阶段“不引入 ORM/Redis/PostgreSQL”的早期约束限制。
 
 ## 项目目录结构 (最终形态)
 
@@ -12,7 +19,8 @@ devops-brain/
 ├── .env                               # 环境变量 (不入库)
 ├── .env.example                       # 环境变量模板
 ├── docs/
-│   └── dev-plan.md                    # 本文件
+│   ├── dev-plan.md                    # MVP 阶段计划
+│   └── enterprise-plan.md             # 企业化落地阶段计划
 ├── src/
 │   ├── __init__.py
 │   ├── core/                          # 编排引擎核心
@@ -265,9 +273,27 @@ curl -X POST http://localhost:8000/api/webhook \
 - [x] 编写面试话术要点（可放在 `docs/interview-notes.md`）
 
 ### Phase 4 Done When
-- ✅ 真实 GitLab MR 触发后，Agent 审查结果自动回写为 MR Comment
-- ✅ LangFuse 后台能看到完整的 Agent 调用链路
-- ✅ `README.md` 包含至少一张系统运行截图
+- [x] mock GitLab MR 触发后，Agent 审查结果可回写为 mock MR Comment
+- [x] HIGH 风险结果可以进入审批页，并支持 Approve / Modify / Reject
+- [x] 自动化测试通过：`poetry run pytest tests -v`
+- [ ] 真实 GitLab MR 触发后，Agent 审查结果自动回写为 MR Comment，并补充截图
+- [ ] LangFuse 后台能看到完整的 Agent 调用链路，并补充截图
+- [ ] 编写面试话术要点：`docs/interview-notes.md`
+
+---
+
+## MVP 后续说明
+
+MVP 阶段到此收口。后续企业化落地能力不继续追加在本文档中，统一进入 `docs/enterprise-plan.md` 管理，包括：
+
+- PostgreSQL 数据持久化
+- SQLAlchemy / Alembic 数据模型与迁移
+- Redis / Celery 异步任务执行
+- 审批历史与审计日志
+- 任务工作台与任务详情页
+- GitLab 回写记录与失败重试
+- 多用户权限与操作人身份
+- 历史审查经验库与 pgvector/RAG
 
 ---
 

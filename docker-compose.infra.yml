@@ -1,0 +1,163 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: devops-brain-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-devops_brain}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devops_brain}
+      POSTGRES_DB: ${APP_POSTGRES_DB:-devops_brain}
+      POSTGRES_MULTIPLE_DATABASES: ${APP_POSTGRES_DB:-devops_brain},${LANGFUSE_POSTGRES_DB:-langfuse}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-devops_brain} -d ${APP_POSTGRES_DB:-devops_brain}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - devops-brain
+
+  redis:
+    image: redis:7
+    container_name: devops-brain-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - devops-brain
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: devops-brain-langfuse-web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "${LANGFUSE_PORT:-3010}:3000"
+    env_file:
+      - ${ENV_FILE:-.env.infra}
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-devops_brain}:${POSTGRES_PASSWORD:-devops_brain}@postgres:5432/${LANGFUSE_POSTGRES_DB:-langfuse}
+      DIRECT_URL: postgresql://${POSTGRES_USER:-devops_brain}:${POSTGRES_PASSWORD:-devops_brain}@postgres:5432/${LANGFUSE_POSTGRES_DB:-langfuse}
+      REDIS_CONNECTION_STRING: redis://redis:6379/1
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_EVENT_UPLOAD_BUCKET:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: ${LANGFUSE_S3_EVENT_UPLOAD_REGION:-auto}
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-miniosecret}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      NEXTAUTH_URL: ${LANGFUSE_PUBLIC_URL:-http://localhost:3000}
+      TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
+    networks:
+      - devops-brain
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: devops-brain-langfuse-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - ${ENV_FILE:-.env.infra}
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-devops_brain}:${POSTGRES_PASSWORD:-devops_brain}@postgres:5432/${LANGFUSE_POSTGRES_DB:-langfuse}
+      DIRECT_URL: postgresql://${POSTGRES_USER:-devops_brain}:${POSTGRES_PASSWORD:-devops_brain}@postgres:5432/${LANGFUSE_POSTGRES_DB:-langfuse}
+      REDIS_CONNECTION_STRING: redis://redis:6379/1
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_EVENT_UPLOAD_BUCKET:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: ${LANGFUSE_S3_EVENT_UPLOAD_REGION:-auto}
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-miniosecret}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
+    networks:
+      - devops-brain
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: devops-brain-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-langfuse}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user ${CLICKHOUSE_USER:-clickhouse} --password ${CLICKHOUSE_PASSWORD:-clickhouse} --query 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      - devops-brain
+
+  minio:
+    image: minio/minio:latest
+    container_name: devops-brain-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniosecret}
+    ports:
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      - devops-brain
+
+volumes:
+  postgres-data:
+  redis-data:
+  clickhouse-data:
+  clickhouse-logs:
+  minio-data:
+
+networks:
+  devops-brain:
+    driver: bridge

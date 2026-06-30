@@ -1,5 +1,8 @@
 # 环境变量（含真实密钥）
 .env
+.env.docker
+.env.infra
+.env.local-with-remote-infra
 
 # Python
 __pycache__/

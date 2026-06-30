@@ -1,0 +1,237 @@
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import sessionmaker
+
+from src.api.globals import pending_reviews
+from src.api.server import app
+from src.db.base import Base
+from src.db.session import get_db
+from src.models import AgentReview, ApprovalRecord, ReviewTask
+
+
+client = TestClient(app)
+
+
+def build_test_session():
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+def override_db(session_factory):
+    def _get_db():
+        db = session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = _get_db
+
+
+def clear_override_db():
+    app.dependency_overrides.pop(get_db, None)
+
+
+def build_graph_mock(final_comment: str = "AI 生成的评论"):
+    graph = Mock()
+    paused_state = SimpleNamespace(next=("human_review",), values={})
+    finished_state = SimpleNamespace(
+        next=(),
+        values={
+            "project_id": "1234",
+            "mr_id": "42",
+            "final_comment": final_comment,
+        },
+    )
+    graph.get_state.side_effect = [paused_state, finished_state]
+    return graph
+
+
+def test_resume_approve_posts_final_comment():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    db.add(ReviewTask(thread_id="thread-approve", project_id="1234", mr_iid="42", status="waiting_human", final_comment="AI 生成的评论"))
+    db.commit()
+    db.close()
+    pending_reviews["thread-approve"] = {"mr_id": "42"}
+    graph = build_graph_mock()
+
+    try:
+        with patch("src.api.routes.approval.graph", graph), patch("src.tools.gitlab_client.post_mr_comment") as post_comment:
+            res = client.post("/api/resume", json={"thread_id": "thread-approve", "decision": "approve"})
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    assert res.json()["comment_posted"] is True
+    graph.update_state.assert_called_once_with(
+        {"configurable": {"thread_id": "thread-approve"}},
+        {"human_decision": "approve"},
+    )
+    post_comment.assert_called_once_with("1234", "42", "AI 生成的评论")
+    assert "thread-approve" not in pending_reviews
+
+    db = session_factory()
+    task = db.query(ReviewTask).filter_by(thread_id="thread-approve").one()
+    record = db.query(ApprovalRecord).filter_by(thread_id="thread-approve").one()
+    assert task.status == "completed"
+    assert record.decision == "approve"
+    assert record.comment_posted is True
+    db.close()
+
+
+def test_resume_reject_finishes_without_posting_comment():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    db.add(ReviewTask(thread_id="thread-reject", project_id="1234", mr_iid="42", status="waiting_human", final_comment="AI 生成的评论"))
+    db.commit()
+    db.close()
+    pending_reviews["thread-reject"] = {"mr_id": "42"}
+    graph = build_graph_mock()
+
+    try:
+        with patch("src.api.routes.approval.graph", graph), patch("src.tools.gitlab_client.post_mr_comment") as post_comment:
+            res = client.post("/api/resume", json={"thread_id": "thread-reject", "decision": "reject"})
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    assert res.json()["comment_posted"] is False
+    graph.update_state.assert_called_once_with(
+        {"configurable": {"thread_id": "thread-reject"}},
+        {"human_decision": "reject"},
+    )
+    post_comment.assert_not_called()
+    assert "thread-reject" not in pending_reviews
+
+    db = session_factory()
+    task = db.query(ReviewTask).filter_by(thread_id="thread-reject").one()
+    record = db.query(ApprovalRecord).filter_by(thread_id="thread-reject").one()
+    assert task.status == "rejected"
+    assert record.decision == "reject"
+    assert record.comment_posted is False
+    db.close()
+
+
+def test_resume_modify_posts_modified_comment():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    db.add(ReviewTask(thread_id="thread-modify", project_id="1234", mr_iid="42", status="waiting_human", final_comment="AI 生成的评论"))
+    db.commit()
+    db.close()
+    pending_reviews["thread-modify"] = {"mr_id": "42"}
+    graph = build_graph_mock(final_comment="人工修改后的评论")
+
+    try:
+        with patch("src.api.routes.approval.graph", graph), patch("src.tools.gitlab_client.post_mr_comment") as post_comment:
+            res = client.post(
+                "/api/resume",
+                json={
+                    "thread_id": "thread-modify",
+                    "decision": "modify",
+                    "modified_comment": "人工修改后的评论",
+                },
+            )
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    assert res.json()["comment_posted"] is True
+    graph.update_state.assert_called_once_with(
+        {"configurable": {"thread_id": "thread-modify"}},
+        {"human_decision": "modify", "final_comment": "人工修改后的评论"},
+    )
+    post_comment.assert_called_once_with("1234", "42", "人工修改后的评论")
+    assert "thread-modify" not in pending_reviews
+
+    db = session_factory()
+    task = db.query(ReviewTask).filter_by(thread_id="thread-modify").one()
+    record = db.query(ApprovalRecord).filter_by(thread_id="thread-modify").one()
+    assert task.status == "completed"
+    assert task.final_comment == "人工修改后的评论"
+    assert record.decision == "modify"
+    assert record.modified_comment == "人工修改后的评论"
+    db.close()
+
+
+def test_resume_modify_requires_modified_comment():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    graph = build_graph_mock()
+
+    try:
+        with patch("src.api.routes.approval.graph", graph):
+            res = client.post("/api/resume", json={"thread_id": "thread-modify-invalid", "decision": "modify"})
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 400
+    assert res.json()["detail"] == "modified_comment is required when decision is modify"
+
+
+def test_resume_rejects_invalid_decision():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    graph = build_graph_mock()
+
+    try:
+        with patch("src.api.routes.approval.graph", graph):
+            res = client.post("/api/resume", json={"thread_id": "thread-invalid", "decision": "skip"})
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 400
+    assert res.json()["detail"] == "decision must be approve, reject or modify"
+
+
+def test_pending_and_history_read_from_database():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    waiting = ReviewTask(
+        thread_id="thread-waiting",
+        project_id="1234",
+        mr_iid="42",
+        status="waiting_human",
+        final_risk_level="HIGH",
+        final_comment="待审批评论",
+    )
+    done = ReviewTask(
+        thread_id="thread-done",
+        project_id="1234",
+        mr_iid="43",
+        status="completed",
+        final_risk_level="LOW",
+        final_comment="已完成评论",
+    )
+    db.add_all([waiting, done])
+    db.commit()
+    db.add(ApprovalRecord(task_id=done.id, thread_id="thread-done", decision="approve", comment_posted=True))
+    db.commit()
+    db.close()
+
+    try:
+        pending_res = client.get("/api/pending")
+        history_res = client.get("/api/history")
+    finally:
+        clear_override_db()
+
+    assert pending_res.status_code == 200
+    assert "thread-waiting" in pending_res.json()
+    assert "thread-done" not in pending_res.json()
+    assert history_res.status_code == 200
+    history = history_res.json()
+    assert {item["thread_id"] for item in history} == {"thread-waiting", "thread-done"}
+    assert next(item for item in history if item["thread_id"] == "thread-done")["approval_decision"] == "approve"

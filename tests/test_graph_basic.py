@@ -1,8 +1,30 @@
 import pytest
 import uuid
+import json
+from unittest.mock import patch
 from src.core.workflow import graph
 
-def test_low_risk_flow():
+def mock_call_llm(prompt: str, agent_name: str = "unknown", model: str = None) -> str:
+    if agent_name == "summary":
+        risk = "HIGH" if "HIGH_RISK" in prompt or '"risk": "HIGH"' in prompt else "LOW"
+        return json.dumps({
+            "final_risk_level": risk,
+            "summary_report": f"Mock summary risk: {risk}",
+            "final_comment": f"Mock GitLab comment risk: {risk}"
+        })
+
+    risk = "HIGH" if "HIGH_RISK" in prompt else "LOW"
+    return json.dumps({
+        "agent": agent_name,
+        "issues": [{"description": "Mock high risk issue"}] if risk == "HIGH" else [],
+        "risk": risk
+    })
+
+@patch("src.agents.quality.call_llm", side_effect=mock_call_llm)
+@patch("src.agents.security.call_llm", side_effect=mock_call_llm)
+@patch("src.agents.architecture.call_llm", side_effect=mock_call_llm)
+@patch("src.agents.summary.call_llm", side_effect=mock_call_llm)
+def test_low_risk_flow(*_):
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
     
@@ -22,7 +44,11 @@ def test_low_risk_flow():
     # 不应该挂起
     assert "human_review" not in (state.next or [])
 
-def test_high_risk_interrupt_and_resume():
+@patch("src.agents.quality.call_llm", side_effect=mock_call_llm)
+@patch("src.agents.security.call_llm", side_effect=mock_call_llm)
+@patch("src.agents.architecture.call_llm", side_effect=mock_call_llm)
+@patch("src.agents.summary.call_llm", side_effect=mock_call_llm)
+def test_high_risk_interrupt_and_resume(*_):
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
     

@@ -16,16 +16,31 @@
         button { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; color: white; }
         .btn-approve { background-color: #5cb85c; }
         .btn-reject { background-color: #d9534f; }
+        .btn-modify { background-color: #337ab7; }
+        .status { display: inline-block; padding: 3px 8px; border-radius: 4px; background: #eef1f5; color: #334; font-size: 12px; font-weight: 600; }
+        .meta { color: #667085; font-size: 13px; }
         pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 13px; }
+        textarea { width: 100%; min-height: 140px; box-sizing: border-box; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Pending Reviews</h1>
         <div id="pending-list">Loading...</div>
+        <h1>Review History</h1>
+        <div id="history-list">Loading...</div>
     </div>
 
     <script>
+        function escapeHtml(value) {
+            return String(value || '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
         async function fetchPending() {
             try {
                 const res = await fetch('/api/pending');
@@ -33,6 +48,16 @@
                 renderList(data);
             } catch (err) {
                 document.getElementById('pending-list').innerText = "Failed to load.";
+            }
+        }
+
+        async function fetchHistory() {
+            try {
+                const res = await fetch('/api/history?limit=50');
+                const data = await res.json();
+                renderHistory(data);
+            } catch (err) {
+                document.getElementById('history-list').innerText = "Failed to load.";
             }
         }
 
@@ -52,15 +77,20 @@
                 card.className = 'card';
                 card.innerHTML = `
                     <div class="header">
-                        <h2>MR !${review.mr_id} <a href="${review.mr_url}" target="_blank" style="font-size: 14px; font-weight: normal;">[View in GitLab]</a></h2>
-                        <span class="risk-${review.final_risk_level}">Risk: ${review.final_risk_level}</span>
+                        <h2>MR !${escapeHtml(review.mr_id)} <a href="${escapeHtml(review.mr_url)}" target="_blank" style="font-size: 14px; font-weight: normal;">[View in GitLab]</a></h2>
+                        <span class="risk-${escapeHtml(review.final_risk_level)}">Risk: ${escapeHtml(review.final_risk_level)}</span>
                     </div>
                     <div>
                         <strong>Summary Report:</strong>
-                        <pre>${review.summary_report}</pre>
+                        <pre>${escapeHtml(review.summary_report)}</pre>
+                    </div>
+                    <div>
+                        <strong>GitLab Comment:</strong>
+                        <textarea id="comment-${thread_id}">${escapeHtml(review.final_comment)}</textarea>
                     </div>
                     <div class="actions">
                         <button class="btn-approve" onclick="submitDecision('${thread_id}', 'approve')">Approve (Resume)</button>
+                        <button class="btn-modify" onclick="submitDecision('${thread_id}', 'modify')">Modify & Submit</button>
                         <button class="btn-reject" onclick="submitDecision('${thread_id}', 'reject')">Reject</button>
                     </div>
                 `;
@@ -68,18 +98,49 @@
             });
         }
 
+        function renderHistory(items) {
+            const list = document.getElementById('history-list');
+            list.innerHTML = '';
+
+            if (!items || items.length === 0) {
+                list.innerHTML = '<p>No review history found.</p>';
+                return;
+            }
+
+            items.forEach(review => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div class="header">
+                        <h2>MR !${escapeHtml(review.mr_id)} <a href="${escapeHtml(review.mr_url)}" target="_blank" style="font-size: 14px; font-weight: normal;">[View in GitLab]</a></h2>
+                        <span class="status">${escapeHtml(review.status)}</span>
+                    </div>
+                    <p class="meta">Thread: ${escapeHtml(review.thread_id)} · Risk: ${escapeHtml(review.final_risk_level || '-')} · Decision: ${escapeHtml(review.approval_decision || '-')} · Posted: ${escapeHtml(review.comment_posted)}</p>
+                    <pre>${escapeHtml(review.final_comment)}</pre>
+                `;
+                list.appendChild(card);
+            });
+        }
+
         async function submitDecision(thread_id, decision) {
             try {
+                const body = { thread_id, decision };
+                if (decision === 'modify') {
+                    body.modified_comment = document.getElementById(`comment-${thread_id}`).value;
+                }
                 const res = await fetch('/api/resume', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ thread_id, decision })
+                    body: JSON.stringify(body)
                 });
                 if (res.ok) {
-                    alert('Decision submitted successfully!');
+                    const result = await res.json();
+                    alert(`Decision submitted: ${result.decision}. Comment posted: ${result.comment_posted}`);
                     fetchPending();
+                    fetchHistory();
                 } else {
-                    alert('Failed to submit decision.');
+                    const error = await res.json();
+                    alert(error.detail || 'Failed to submit decision.');
                 }
             } catch (err) {
                 alert('Error submitting decision.');
@@ -87,6 +148,7 @@
         }
 
         fetchPending();
+        fetchHistory();
     </script>
 </body>
 </html>

@@ -15,6 +15,9 @@ litellm = "^1.30.0"
 pydantic = "^2.6.0"
 langfuse = "^2.0.0"
 httpx = "^0.28.1"
+sqlalchemy = "^2.0.51"
+alembic = "^1.18.5"
+psycopg = {extras = ["binary"], version = "^3.3.4"}
 
 [build-system]
 requires = ["poetry-core"]
