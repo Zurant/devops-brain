@@ -19,6 +19,7 @@ def create_review_task(
     source_branch: str | None = None,
     target_branch: str | None = None,
     title: str | None = None,
+    status: str = "running",
 ) -> ReviewTask:
     task = ReviewTask(
         thread_id=thread_id,
@@ -28,9 +29,31 @@ def create_review_task(
         source_branch=source_branch,
         target_branch=target_branch,
         title=title,
-        status="running",
+        status=status,
     )
     db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def update_task_status(
+    db: Session,
+    thread_id: str,
+    status: str,
+    *,
+    error_message: str | None = None,
+) -> ReviewTask | None:
+    task = get_review_task_by_thread_id(db, thread_id)
+    if task is None:
+        return None
+
+    task.status = status
+    task.error_message = error_message
+    task.updated_at = datetime.now(timezone.utc)
+    if status in {"completed", "rejected", "failed"}:
+        task.completed_at = datetime.now(timezone.utc)
+
     db.commit()
     db.refresh(task)
     return task

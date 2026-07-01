@@ -148,10 +148,11 @@ cp .env.local-with-remote-infra.example .env
 
 首次进入 Langfuse 后创建项目，将项目的 `LANGFUSE_PUBLIC_KEY` 和 `LANGFUSE_SECRET_KEY` 写回本地 `.env`。
 
-本地执行业务库迁移并启动服务：
+本地执行业务库迁移并启动 API 与审查 Worker：
 ```bash
 poetry run alembic upgrade head
 poetry run uvicorn src.api.server:app --reload
+poetry run python -m src.queue.worker
 ```
 
 本地访问：
@@ -173,6 +174,10 @@ cp .env.example .env
 ```
 
 ### 3. 运行服务
+
+Webhook 审查已改为 Redis/RQ 异步任务。启动本地应用前，需要确认 `.env` 中的 `REDIS_URL` 指向可用 Redis。
+
+终端 1 启动 API：
 ```bash
 poetry run uvicorn src.api.server:app --reload
 ```
@@ -181,6 +186,13 @@ Mock 模式启动：
 ```bash
 ENV=mock poetry run uvicorn src.api.server:app --reload
 ```
+
+终端 2 启动审查 Worker：
+```bash
+poetry run python -m src.queue.worker
+```
+
+macOS 本地默认使用 RQ `SimpleWorker` 避免 fork 崩溃；Linux 服务器默认使用标准 fork worker。如需手动指定：`RQ_WORKER_MODE=simple` 或 `RQ_WORKER_MODE=fork`。
 
 ### 4. 本地自测
 
@@ -199,6 +211,15 @@ poetry run pytest tests -v
 curl -X POST http://127.0.0.1:8000/api/webhook \
   -H "Content-Type: application/json" \
   -d @tests/fixtures/mock_mr_payload.json
+```
+
+接口会快速返回 `queued`，实际 Multi-Agent 审查由 Worker 后台执行：
+```json
+{
+  "status": "queued",
+  "thread_id": "...",
+  "job_id": "..."
+}
 ```
 
 查看待审批列表：
