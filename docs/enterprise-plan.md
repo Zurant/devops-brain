@@ -234,6 +234,8 @@ graph LR
 当前进度：
 - Phase E1 已完成基础落地：已引入 SQLAlchemy / Alembic / PostgreSQL 驱动，新增三张核心表与 migration，并通过模型编译和全量测试。
 - Phase E2 已完成第一版落地：`/api/pending`、`/api/resume`、`/api/history` 已接入数据库，审批页面已展示 Review History。
+- Phase E3 已完成第一版落地：Webhook 已改为 Redis/RQ 异步入队，Worker 后台执行 LangGraph，任务运行状态、失败原因与重试次数已落库。
+- Phase E4 已完成第一版落地：Agent 输出、GitLab 评论回写成功/失败记录已落库，提供任务详情接口与失败评论重试接口。
 
 ### Phase E1: 数据库基础设施
 
@@ -291,6 +293,12 @@ Done When：
 - Webhook 响应时间不依赖 LLM 耗时
 - 后台失败可在任务详情中看到错误原因
 
+已完成：
+- `/api/webhook` 创建 `review_tasks` 后快速返回 `queued` 与 `job_id`
+- `src.queue.worker` 后台执行审查任务，macOS 默认使用 `SimpleWorker` 避免 fork 崩溃
+- `review_tasks` 已记录 `job_id`、`retry_count`、`initial_state`、`queued_at`、`started_at`、`failed_at`
+- `/api/reviews/{thread_id}/retry` 支持失败或排队任务重新入队
+
 ### Phase E4: Agent 输出与回写记录落库
 
 目标：完整审计每次审查。
@@ -304,6 +312,13 @@ Done When：
 Done When：
 - 任务详情页能看到每个 Agent 的发现、风险和原始输出
 - GitLab 回写成功/失败都有记录
+
+已完成：
+- 每次图执行后的 `reviews` 会同步写入 `agent_reviews`
+- 新增 `gitlab_comment_records`，记录自动回写、人工 approve/modify 回写与评论重试结果
+- `/api/reviews/{thread_id}` 返回任务详情、Agent 输出、审批记录与 GitLab 回写记录
+- `/api/reviews/{thread_id}/comments/retry` 支持只重试失败的 GitLab 评论回写
+- 审批页面可展开任务详情并查看 Agent 输出、审批记录和评论回写记录
 
 ### Phase E5: 企业工作台
 

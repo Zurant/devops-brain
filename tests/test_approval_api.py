@@ -10,7 +10,7 @@ from src.api.globals import pending_reviews
 from src.api.server import app
 from src.db.base import Base
 from src.db.session import get_db
-from src.models import AgentReview, ApprovalRecord, ReviewTask
+from src.models import AgentReview, ApprovalRecord, GitLabCommentRecord, ReviewTask
 
 
 client = TestClient(app)
@@ -84,9 +84,12 @@ def test_resume_approve_posts_final_comment():
     db = session_factory()
     task = db.query(ReviewTask).filter_by(thread_id="thread-approve").one()
     record = db.query(ApprovalRecord).filter_by(thread_id="thread-approve").one()
+    comment_record = db.query(GitLabCommentRecord).filter_by(thread_id="thread-approve").one()
     assert task.status == "completed"
     assert record.decision == "approve"
     assert record.comment_posted is True
+    assert comment_record.source == "approve"
+    assert comment_record.success is True
     db.close()
 
 
@@ -159,10 +162,13 @@ def test_resume_modify_posts_modified_comment():
     db = session_factory()
     task = db.query(ReviewTask).filter_by(thread_id="thread-modify").one()
     record = db.query(ApprovalRecord).filter_by(thread_id="thread-modify").one()
+    comment_record = db.query(GitLabCommentRecord).filter_by(thread_id="thread-modify").one()
     assert task.status == "completed"
     assert task.final_comment == "人工修改后的评论"
     assert record.decision == "modify"
     assert record.modified_comment == "人工修改后的评论"
+    assert comment_record.comment_body == "人工修改后的评论"
+    assert comment_record.source == "modify"
     db.close()
 
 
@@ -235,3 +241,114 @@ def test_pending_and_history_read_from_database():
     history = history_res.json()
     assert {item["thread_id"] for item in history} == {"thread-waiting", "thread-done"}
     assert next(item for item in history if item["thread_id"] == "thread-done")["approval_decision"] == "approve"
+
+
+def test_review_detail_returns_audit_records():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    task = ReviewTask(
+        thread_id="thread-detail",
+        project_id="1234",
+        mr_iid="42",
+        status="completed",
+        final_risk_level="MEDIUM",
+        final_comment="最终评论",
+    )
+    db.add(task)
+    db.commit()
+    db.add_all(
+        [
+            AgentReview(task_id=task.id, agent_name="security", risk="HIGH", issues=[{"title": "SQL 注入"}]),
+            ApprovalRecord(task_id=task.id, thread_id="thread-detail", decision="approve", comment_posted=True),
+            GitLabCommentRecord(
+                task_id=task.id,
+                thread_id="thread-detail",
+                project_id="1234",
+                mr_iid="42",
+                comment_body="最终评论",
+                source="approve",
+                success=True,
+            ),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    try:
+        res = client.get("/api/reviews/thread-detail")
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["thread_id"] == "thread-detail"
+    assert body["agent_reviews"][0]["agent_name"] == "security"
+    assert body["approval_records"][0]["decision"] == "approve"
+    assert body["gitlab_comment_records"][0]["success"] is True
+
+
+def test_resume_records_failed_gitlab_comment():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    db.add(ReviewTask(thread_id="thread-post-fail", project_id="1234", mr_iid="42", status="waiting_human", final_comment="AI 生成的评论"))
+    db.commit()
+    db.close()
+    pending_reviews["thread-post-fail"] = {"mr_id": "42"}
+    graph = build_graph_mock()
+
+    try:
+        with patch("src.api.routes.approval.graph", graph), patch(
+            "src.tools.gitlab_client.post_mr_comment", side_effect=RuntimeError("GitLab 不可用")
+        ):
+            res = client.post("/api/resume", json={"thread_id": "thread-post-fail", "decision": "approve"})
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 502
+    db = session_factory()
+    record = db.query(GitLabCommentRecord).filter_by(thread_id="thread-post-fail").one()
+    assert record.success is False
+    assert record.error_message == "GitLab 不可用"
+    db.close()
+
+
+def test_retry_failed_gitlab_comment_posts_again():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    task = ReviewTask(thread_id="thread-comment-retry", project_id="1234", mr_iid="42", status="completed")
+    db.add(task)
+    db.commit()
+    db.add(
+        GitLabCommentRecord(
+            task_id=task.id,
+            thread_id="thread-comment-retry",
+            project_id="1234",
+            mr_iid="42",
+            comment_body="待重试评论",
+            source="approve",
+            success=False,
+            error_message="上次失败",
+        )
+    )
+    db.commit()
+    db.close()
+
+    try:
+        with patch("src.tools.gitlab_client.post_mr_comment") as post_comment:
+            res = client.post("/api/reviews/thread-comment-retry/comments/retry")
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    assert res.json() == {"status": "comment_posted", "thread_id": "thread-comment-retry"}
+    post_comment.assert_called_once_with("1234", "42", "待重试评论")
+
+    db = session_factory()
+    records = db.query(GitLabCommentRecord).filter_by(thread_id="thread-comment-retry").order_by(GitLabCommentRecord.id).all()
+    assert len(records) == 2
+    assert records[-1].source == "retry"
+    assert records[-1].success is True
+    db.close()

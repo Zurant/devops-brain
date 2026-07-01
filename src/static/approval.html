@@ -17,8 +17,14 @@
         .btn-approve { background-color: #5cb85c; }
         .btn-reject { background-color: #d9534f; }
         .btn-modify { background-color: #337ab7; }
+        .btn-retry { background-color: #6f42c1; }
+        .btn-detail { background-color: #344054; }
         .status { display: inline-block; padding: 3px 8px; border-radius: 4px; background: #eef1f5; color: #334; font-size: 12px; font-weight: 600; }
         .meta { color: #667085; font-size: 13px; }
+        .error { color: #b42318; background: #fff4f2; border: 1px solid #fecdca; padding: 10px; border-radius: 4px; font-size: 13px; }
+        .detail { margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; }
+        .detail h3 { margin: 14px 0 8px; font-size: 15px; }
+        .record { border: 1px solid #eaecf0; border-radius: 4px; padding: 10px; margin-bottom: 8px; }
         pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 13px; }
         textarea { width: 100%; min-height: 140px; box-sizing: border-box; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
     </style>
@@ -92,7 +98,9 @@
                         <button class="btn-approve" onclick="submitDecision('${thread_id}', 'approve')">Approve (Resume)</button>
                         <button class="btn-modify" onclick="submitDecision('${thread_id}', 'modify')">Modify & Submit</button>
                         <button class="btn-reject" onclick="submitDecision('${thread_id}', 'reject')">Reject</button>
+                        <button class="btn-detail" onclick="loadReviewDetail('${thread_id}')">Details</button>
                     </div>
+                    <div id="detail-${thread_id}" class="detail" style="display:none;"></div>
                 `;
                 list.appendChild(card);
             });
@@ -110,16 +118,122 @@
             items.forEach(review => {
                 const card = document.createElement('div');
                 card.className = 'card';
+                const retryAction = review.status === 'failed'
+                    ? `<div class="actions"><button class="btn-retry" onclick="retryReview('${escapeHtml(review.thread_id)}')">Retry</button></div>`
+                    : '';
+                const errorBlock = review.error_message
+                    ? `<div class="error">${escapeHtml(review.error_message)}</div>`
+                    : '';
                 card.innerHTML = `
                     <div class="header">
                         <h2>MR !${escapeHtml(review.mr_id)} <a href="${escapeHtml(review.mr_url)}" target="_blank" style="font-size: 14px; font-weight: normal;">[View in GitLab]</a></h2>
                         <span class="status">${escapeHtml(review.status)}</span>
                     </div>
-                    <p class="meta">Thread: ${escapeHtml(review.thread_id)} · Risk: ${escapeHtml(review.final_risk_level || '-')} · Decision: ${escapeHtml(review.approval_decision || '-')} · Posted: ${escapeHtml(review.comment_posted)}</p>
+                    <p class="meta">Thread: ${escapeHtml(review.thread_id)} · Job: ${escapeHtml(review.job_id || '-')} · Retry: ${escapeHtml(review.retry_count)} · Risk: ${escapeHtml(review.final_risk_level || '-')} · Decision: ${escapeHtml(review.approval_decision || '-')} · Posted: ${escapeHtml(review.comment_posted)}</p>
+                    <p class="meta">Queued: ${escapeHtml(review.queued_at || '-')} · Started: ${escapeHtml(review.started_at || '-')} · Failed: ${escapeHtml(review.failed_at || '-')} · Completed: ${escapeHtml(review.completed_at || '-')}</p>
+                    ${errorBlock}
                     <pre>${escapeHtml(review.final_comment)}</pre>
+                    <div class="actions">
+                        <button class="btn-detail" onclick="loadReviewDetail('${escapeHtml(review.thread_id)}')">Details</button>
+                        ${review.status === 'failed' ? `<button class="btn-retry" onclick="retryReview('${escapeHtml(review.thread_id)}')">Retry</button>` : ''}
+                    </div>
+                    <div id="detail-${escapeHtml(review.thread_id)}" class="detail" style="display:none;"></div>
                 `;
                 list.appendChild(card);
             });
+        }
+
+        function renderReviewDetail(detail) {
+            const agentReviews = (detail.agent_reviews || []).map(item => `
+                <div class="record">
+                    <p class="meta">Agent: ${escapeHtml(item.agent_name)} · Risk: ${escapeHtml(item.risk || '-')} · Model: ${escapeHtml(item.model_name || '-')}</p>
+                    ${item.error_message ? `<div class="error">${escapeHtml(item.error_message)}</div>` : ''}
+                    <pre>${escapeHtml(JSON.stringify(item.issues || [], null, 2))}</pre>
+                </div>
+            `).join('') || '<p class="meta">No agent reviews.</p>';
+
+            const approvals = (detail.approval_records || []).map(item => `
+                <div class="record">
+                    <p class="meta">Decision: ${escapeHtml(item.decision)} · Posted: ${escapeHtml(item.comment_posted)} · At: ${escapeHtml(item.decided_at || '-')}</p>
+                    ${item.modified_comment ? `<pre>${escapeHtml(item.modified_comment)}</pre>` : ''}
+                </div>
+            `).join('') || '<p class="meta">No approval records.</p>';
+
+            const comments = (detail.gitlab_comment_records || []).map(item => `
+                <div class="record">
+                    <p class="meta">Source: ${escapeHtml(item.source)} · Success: ${escapeHtml(item.success)} · At: ${escapeHtml(item.posted_at || '-')}</p>
+                    ${item.error_message ? `<div class="error">${escapeHtml(item.error_message)}</div>` : ''}
+                    <pre>${escapeHtml(item.comment_body || '')}</pre>
+                    ${item.success === false ? `<div class="actions"><button class="btn-retry" onclick="retryGitlabComment('${escapeHtml(detail.thread_id)}')">Retry Comment</button></div>` : ''}
+                </div>
+            `).join('') || '<p class="meta">No GitLab comment records.</p>';
+
+            return `
+                <h3>Agent Reviews</h3>
+                ${agentReviews}
+                <h3>Approval Records</h3>
+                ${approvals}
+                <h3>GitLab Comments</h3>
+                ${comments}
+            `;
+        }
+
+        async function loadReviewDetail(thread_id) {
+            const detailBox = document.getElementById(`detail-${thread_id}`);
+            if (!detailBox) return;
+            if (detailBox.style.display !== 'none' && detailBox.innerHTML) {
+                detailBox.style.display = 'none';
+                return;
+            }
+            detailBox.style.display = 'block';
+            detailBox.innerHTML = '<p class="meta">Loading details...</p>';
+            try {
+                const res = await fetch(`/api/reviews/${thread_id}`);
+                if (!res.ok) {
+                    const error = await res.json();
+                    detailBox.innerHTML = `<div class="error">${escapeHtml(error.detail || 'Failed to load detail.')}</div>`;
+                    return;
+                }
+                const detail = await res.json();
+                detailBox.innerHTML = renderReviewDetail(detail);
+            } catch (err) {
+                detailBox.innerHTML = '<div class="error">Error loading detail.</div>';
+            }
+        }
+
+        async function retryReview(thread_id) {
+            try {
+                const res = await fetch(`/api/reviews/${thread_id}/retry`, { method: 'POST' });
+                if (res.ok) {
+                    const result = await res.json();
+                    alert(`Retry queued: ${result.job_id}`);
+                    fetchPending();
+                    fetchHistory();
+                } else {
+                    const error = await res.json();
+                    alert(error.detail || 'Failed to retry review.');
+                }
+            } catch (err) {
+                alert('Error retrying review.');
+            }
+        }
+
+        async function retryGitlabComment(thread_id) {
+            try {
+                const res = await fetch(`/api/reviews/${thread_id}/comments/retry`, { method: 'POST' });
+                if (res.ok) {
+                    alert('GitLab comment posted.');
+                    fetchHistory();
+                    const detailBox = document.getElementById(`detail-${thread_id}`);
+                    if (detailBox) detailBox.innerHTML = '';
+                    loadReviewDetail(thread_id);
+                } else {
+                    const error = await res.json();
+                    alert(error.detail || 'Failed to retry GitLab comment.');
+                }
+            } catch (err) {
+                alert('Error retrying GitLab comment.');
+            }
         }
 
         async function submitDecision(thread_id, decision) {

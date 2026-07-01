@@ -7,7 +7,7 @@
 
 MVP 功能主链路已完成：项目已经可以基于 mock GitLab MR payload 跑通「Webhook 触发 -> 多 Agent 并行审查 -> Summary 风险汇总 -> HIGH 风险人工审批 -> Approve/Modify 回写评论、Reject 结束流程」的闭环。
 
-企业化落地已开始：当前已引入 PostgreSQL + SQLAlchemy + Alembic，新增审查任务、Agent 输出、审批记录三张核心表，并将待审批列表、审批结果、Review History 接入数据库。后续异步任务队列、审计日志、权限模型等规划见 [企业化演进计划](docs/enterprise-plan.md)。
+企业化落地已开始：当前已引入 PostgreSQL + SQLAlchemy + Alembic，新增审查任务、Agent 输出、审批记录、GitLab 评论回写记录等核心表，并将待审批列表、审批结果、Review History 接入数据库。后续审计日志、权限模型等规划见 [企业化演进计划](docs/enterprise-plan.md)。
 
 ## 🛠️ 重点技术栈
 MVP 阶段使用以下技术栈：
@@ -231,6 +231,23 @@ curl http://127.0.0.1:8000/api/pending
 ```bash
 curl http://127.0.0.1:8000/api/history
 ```
+
+查看单个任务详情，包括 Agent 输出、审批记录和 GitLab 评论回写记录：
+```bash
+curl http://127.0.0.1:8000/api/reviews/<thread_id>
+```
+
+失败任务重新入队：
+```bash
+curl -X POST http://127.0.0.1:8000/api/reviews/<thread_id>/retry
+```
+
+失败 GitLab 评论单独重试：
+```bash
+curl -X POST http://127.0.0.1:8000/api/reviews/<thread_id>/comments/retry
+```
+
+任务状态会记录 `queued_at`、`started_at`、`failed_at`、`completed_at`、`retry_count`、`job_id` 与 `error_message`，用于排查 Worker 失败和重试链路。
 
 打开审批页面：
 ```text

@@ -7,9 +7,12 @@ from src.core.workflow import graph
 from src.api.globals import pending_reviews
 from src.db.session import get_db
 from src.services.review_task_service import (
+    get_review_detail,
+    get_latest_failed_gitlab_comment_record,
     get_review_task_by_thread_id,
     list_pending_reviews,
     list_review_history,
+    record_gitlab_comment_result,
     record_approval_decision,
     update_task_from_graph_state,
 )
@@ -66,12 +69,33 @@ async def resume_workflow(req: ResumeRequest, db: Session = Depends(get_db)):
         # approve/modify 执行回写；reject 仅结束流程，保留人工拒绝决策
         current_values = state.values
         if decision in {"approve", "modify"}:
-            post_mr_comment(
-                current_values.get("project_id", "mock"),
-                current_values.get("mr_id", "mock"),
-                current_values.get("final_comment", "")
-            )
-            comment_posted = True
+            project_id = current_values.get("project_id", "mock")
+            mr_id = current_values.get("mr_id", "mock")
+            final_comment = current_values.get("final_comment", "")
+            try:
+                post_mr_comment(project_id, mr_id, final_comment)
+                comment_posted = True
+                record_gitlab_comment_result(
+                    db,
+                    thread_id=thread_id,
+                    project_id=project_id,
+                    mr_iid=mr_id,
+                    comment_body=final_comment,
+                    source=decision,
+                    success=True,
+                )
+            except Exception as exc:
+                record_gitlab_comment_result(
+                    db,
+                    thread_id=thread_id,
+                    project_id=project_id,
+                    mr_iid=mr_id,
+                    comment_body=final_comment,
+                    source=decision,
+                    success=False,
+                    error_message=str(exc),
+                )
+                raise HTTPException(status_code=502, detail=f"failed to post GitLab comment: {exc}")
 
         current_values = state.values
         update_task_from_graph_state(
@@ -105,3 +129,46 @@ async def get_pending_reviews(db: Session = Depends(get_db)):
 @router.get("/history")
 async def get_review_history(limit: int = 50, db: Session = Depends(get_db)):
     return list_review_history(db, limit=limit)
+
+
+@router.get("/reviews/{thread_id}")
+async def get_review_task_detail(thread_id: str, db: Session = Depends(get_db)):
+    detail = get_review_detail(db, thread_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="review task not found")
+    return detail
+
+
+@router.post("/reviews/{thread_id}/comments/retry")
+async def retry_gitlab_comment(thread_id: str, db: Session = Depends(get_db)):
+    failed_record = get_latest_failed_gitlab_comment_record(db, thread_id)
+    if failed_record is None:
+        raise HTTPException(status_code=404, detail="failed GitLab comment record not found")
+
+    from src.tools.gitlab_client import post_mr_comment
+
+    try:
+        post_mr_comment(failed_record.project_id, failed_record.mr_iid, failed_record.comment_body or "")
+        record_gitlab_comment_result(
+            db,
+            thread_id=thread_id,
+            project_id=failed_record.project_id,
+            mr_iid=failed_record.mr_iid,
+            comment_body=failed_record.comment_body,
+            source="retry",
+            success=True,
+        )
+    except Exception as exc:
+        record_gitlab_comment_result(
+            db,
+            thread_id=thread_id,
+            project_id=failed_record.project_id,
+            mr_iid=failed_record.mr_iid,
+            comment_body=failed_record.comment_body,
+            source="retry",
+            success=False,
+            error_message=str(exc),
+        )
+        raise HTTPException(status_code=502, detail=f"failed to post GitLab comment: {exc}")
+
+    return {"status": "comment_posted", "thread_id": thread_id}
