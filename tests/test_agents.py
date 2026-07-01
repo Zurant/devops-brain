@@ -36,16 +36,19 @@ def test_parse_agent_json():
     assert "error" in res3
 
 @patch("src.agents.quality.call_llm", side_effect=mock_call_llm_success)
-def test_quality_agent_success(mock_llm):
+@patch("src.agents.quality.retrieve_relevant_knowledge", return_value=[])
+def test_quality_agent_success(mock_knowledge, mock_llm):
     state = {"diff_content": "def foo(): pass"}
     res = quality_agent(state)
     reviews = res["reviews"]
     assert len(reviews) == 1
     assert reviews[0]["agent"] == "quality"
     assert reviews[0]["risk"] == "LOW"
+    mock_knowledge.assert_called_once_with("def foo(): pass", agent_name="quality")
 
 @patch("src.agents.security.call_llm", side_effect=mock_call_llm_fail)
-def test_security_agent_fallback(mock_llm):
+@patch("src.agents.security.retrieve_relevant_knowledge", return_value=[])
+def test_security_agent_fallback(mock_knowledge, mock_llm):
     state = {"diff_content": "SELECT * FROM users"}
     res = security_agent(state)
     reviews = res["reviews"]
@@ -55,7 +58,32 @@ def test_security_agent_fallback(mock_llm):
     assert "error" in reviews[0]
 
 @patch("src.agents.architecture.call_llm", side_effect=mock_call_llm_success)
-def test_architecture_agent_success(mock_llm):
+@patch("src.agents.architecture.retrieve_relevant_knowledge", return_value=[])
+def test_architecture_agent_success(mock_knowledge, mock_llm):
     state = {"diff_content": "class A: pass"}
     res = architecture_agent(state)
     assert res["reviews"][0]["agent"] == "architecture"
+
+
+@patch(
+    "src.agents.security.retrieve_relevant_knowledge",
+    return_value=[
+        {
+            "issue_type": "sql_injection",
+            "risk": "HIGH",
+            "title": "SQL 注入风险",
+            "description": "拼接 SQL。",
+            "suggestion": "使用参数化查询。",
+        }
+    ],
+)
+@patch("src.agents.security.call_llm", side_effect=mock_call_llm_success)
+def test_security_agent_injects_knowledge_context(mock_llm, mock_knowledge):
+    state = {"diff_content": "cursor.execute('SELECT * FROM users')"}
+
+    security_agent(state)
+
+    prompt = mock_llm.call_args.args[0]
+    assert "历史经验参考" in prompt
+    assert "SQL 注入风险" in prompt
+    assert "使用参数化查询" in prompt

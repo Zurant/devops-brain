@@ -1,9 +1,13 @@
 from src.core.state import ReviewState
 from src.tools.llm_client import call_llm
 from src.agents import parse_agent_json
+from src.services.knowledge_retrieval_service import format_knowledge_prompt, retrieve_relevant_knowledge
 
 PROMPT_TEMPLATE = """
 请作为安全审计专家，检查以下代码是否存在安全漏洞，例如 SQL 注入、XSS、密钥泄露、不安全的依赖等。
+历史经验参考：
+{knowledge_context}
+
 请必须返回如下格式的纯 JSON，不要包含其他多余解释：
 {
     "agent": "security",
@@ -19,7 +23,8 @@ PROMPT_TEMPLATE = """
 
 def security_agent(state: ReviewState):
     diff = state.get("diff_content", "")
-    prompt = PROMPT_TEMPLATE.replace("{diff_content}", diff)
+    knowledge_context = format_knowledge_prompt(retrieve_relevant_knowledge(diff, agent_name="security"))
+    prompt = PROMPT_TEMPLATE.replace("{knowledge_context}", knowledge_context).replace("{diff_content}", diff)
     response_text = call_llm(prompt, agent_name="security")
     print("\n--- RAW LLM RESPONSE ---")
     print(response_text)
