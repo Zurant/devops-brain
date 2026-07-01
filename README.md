@@ -7,7 +7,7 @@
 
 MVP 功能主链路已完成：项目已经可以基于 mock GitLab MR payload 跑通「Webhook 触发 -> 多 Agent 并行审查 -> Summary 风险汇总 -> HIGH 风险人工审批 -> Approve/Modify 回写评论、Reject 结束流程」的闭环。
 
-企业化落地已开始：当前已引入 PostgreSQL + SQLAlchemy + Alembic，新增审查任务、Agent 输出、审批记录、GitLab 评论回写记录、审计日志、历史审查经验等核心表，并将待审批列表、审批结果、审查历史、任务详情接入数据库。后续权限模型与 pgvector 召回增强见 [企业化演进计划](docs/enterprise-plan.md)。
+企业化落地已开始：当前已引入 PostgreSQL + SQLAlchemy + Alembic，新增审查任务、Agent 输出、审批记录、GitLab 评论回写记录、审计日志、历史审查经验等核心表，并将待审批列表、审批结果、审查历史、任务详情接入数据库。后续权限模型与 pgvector 召回增强见 [企业化演进计划](docs/enterprise-plan.md)，真实企业 MR 审查引擎改造见 [企业化审查引擎落地计划](docs/enterprise-review-engine-plan.md)。
 
 ## 🛠️ 重点技术栈
 MVP 阶段使用以下技术栈：
