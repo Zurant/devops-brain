@@ -44,3 +44,4 @@ class ReviewTask(Base):
     agent_reviews = relationship("AgentReview", back_populates="task", cascade="all, delete-orphan")
     approval_records = relationship("ApprovalRecord", back_populates="task", cascade="all, delete-orphan")
     gitlab_comment_records = relationship("GitLabCommentRecord", back_populates="task", cascade="all, delete-orphan")
+    knowledge_entries = relationship("ReviewKnowledge", back_populates="source_task")

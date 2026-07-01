@@ -238,6 +238,7 @@ graph LR
 - Phase E4 已完成第一版落地：Agent 输出、GitLab 评论回写成功/失败记录已落库，提供任务详情接口与失败评论重试接口。
 - Phase E5 已开始第一版落地：历史列表已支持按状态、风险、项目筛选，审批页面已补充工作台筛选栏与任务详情展开。
 - 审计能力已开始第一版落地：新增 `audit_logs`，审批、任务重试、评论重试会记录操作者与操作详情。
+- Phase E6 已开始第一版落地：新增 `review_knowledge` 经验库基础表，支持手动创建、查询，以及从审查任务的 Agent 问题沉淀经验。
 
 ### Phase E1: 数据库基础设施
 
@@ -355,6 +356,18 @@ Done When：
 Done When：
 - 类似问题能召回历史审查建议
 - Summary 报告可引用历史经验
+
+已完成第一步：
+- 新增 `review_knowledge` 表与 migration
+- `GET /api/knowledge` 支持按问题类型、风险、来源线程、来源 Agent 查询
+- `POST /api/knowledge` 支持手动创建经验
+- `POST /api/reviews/{thread_id}/knowledge` 支持从审查任务的 Agent 问题沉淀经验
+- 审批工作台历史任务卡片已提供“沉淀经验”入口，详情页可查看关联历史经验
+
+剩余增强：
+- 引入 pgvector 并生成 embedding
+- 审查前召回相似经验注入 Agent prompt
+- Summary 报告引用命中的历史经验
 
 ## 8. MVP 到企业版的迁移原则
 

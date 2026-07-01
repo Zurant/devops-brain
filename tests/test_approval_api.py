@@ -10,7 +10,7 @@ from src.api.globals import pending_reviews
 from src.api.server import app
 from src.db.base import Base
 from src.db.session import get_db
-from src.models import AgentReview, ApprovalRecord, AuditLog, GitLabCommentRecord, ReviewTask
+from src.models import AgentReview, ApprovalRecord, AuditLog, GitLabCommentRecord, ReviewKnowledge, ReviewTask
 
 
 client = TestClient(app)
@@ -335,6 +335,17 @@ def test_review_detail_returns_audit_records():
                 resource_id="thread-detail",
                 detail={"comment_posted": True},
             ),
+            ReviewKnowledge(
+                issue_type="SQL 注入",
+                risk="HIGH",
+                title="参数拼接 SQL",
+                description="发现字符串拼接 SQL",
+                suggestion="使用参数化查询",
+                source_task_id=task.id,
+                source_thread_id="thread-detail",
+                source_agent="security",
+                created_by="alice",
+            ),
         ]
     )
     db.commit()
@@ -355,6 +366,7 @@ def test_review_detail_returns_audit_records():
     assert body["agent_reviews"][0]["agent_name"] == "security"
     assert body["approval_records"][0]["decision"] == "approve"
     assert body["gitlab_comment_records"][0]["success"] is True
+    assert body["knowledge_entries"][0]["issue_type"] == "SQL 注入"
     assert body["audit_logs"][0]["actor"] == "alice"
 
 
@@ -378,6 +390,91 @@ def test_audit_logs_can_be_queried():
 
     assert res.status_code == 200
     assert [item["resource_id"] for item in res.json()] == ["thread-a"]
+
+
+def test_knowledge_can_be_created_and_queried():
+    session_factory = build_test_session()
+    override_db(session_factory)
+
+    try:
+        create_res = client.post(
+            "/api/knowledge",
+            json={
+                "issue_type": "SQL 注入",
+                "risk": "HIGH",
+                "title": "参数拼接 SQL",
+                "description": "发现用户输入直接拼接 SQL。",
+                "suggestion": "改为参数化查询。",
+                "tags": ["security"],
+            },
+            headers={"X-Operator": "alice"},
+        )
+        query_res = client.get("/api/knowledge?risk=HIGH")
+    finally:
+        clear_override_db()
+
+    assert create_res.status_code == 200
+    assert create_res.json()["created_by"] == "alice"
+    assert create_res.json()["issue_type"] == "SQL 注入"
+    assert query_res.status_code == 200
+    assert query_res.json()[0]["suggestion"] == "改为参数化查询。"
+
+    db = session_factory()
+    audit_log = db.query(AuditLog).filter_by(action="knowledge.create").one()
+    assert audit_log.actor == "alice"
+    db.close()
+
+
+def test_review_issues_can_be_promoted_to_knowledge():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    task = ReviewTask(thread_id="thread-knowledge", project_id="1234", mr_iid="42", status="completed", final_risk_level="HIGH")
+    db.add(task)
+    db.commit()
+    db.add_all(
+        [
+            AgentReview(
+                task_id=task.id,
+                agent_name="security",
+                risk="HIGH",
+                issues=[
+                    {
+                        "title": "SQL 注入风险",
+                        "type": "sql_injection",
+                        "description": "登录接口拼接 SQL。",
+                        "suggestion": "使用参数化查询。",
+                    }
+                ],
+            ),
+            AgentReview(task_id=task.id, agent_name="quality", risk="LOW", issues=[]),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    try:
+        res = client.post(
+            "/api/reviews/thread-knowledge/knowledge",
+            json={"tags": ["人工确认"]},
+            headers={"X-Operator": "bob"},
+        )
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["created_count"] == 1
+    assert body["items"][0]["issue_type"] == "sql_injection"
+    assert body["items"][0]["created_by"] == "bob"
+
+    db = session_factory()
+    knowledge = db.query(ReviewKnowledge).filter_by(source_thread_id="thread-knowledge").one()
+    audit_log = db.query(AuditLog).filter_by(resource_id="thread-knowledge").one()
+    assert knowledge.source_agent == "security"
+    assert knowledge.tags == ["人工确认"]
+    assert audit_log.action == "knowledge.create_from_review"
+    db.close()
 
 
 def test_resume_records_failed_gitlab_comment():

@@ -7,15 +7,19 @@ from src.core.workflow import graph
 from src.api.globals import pending_reviews
 from src.db.session import get_db
 from src.services.review_task_service import (
+    create_knowledge_from_review_task,
+    create_review_knowledge,
     get_review_detail,
     get_latest_failed_gitlab_comment_record,
     get_review_task_by_thread_id,
     list_audit_logs,
     list_pending_reviews,
+    list_review_knowledge,
     list_review_history,
     record_audit_log,
     record_gitlab_comment_result,
     record_approval_decision,
+    serialize_review_knowledge,
     update_task_from_graph_state,
 )
 
@@ -25,6 +29,21 @@ class ResumeRequest(BaseModel):
     thread_id: str
     decision: str  # approve / reject / modify
     modified_comment: Optional[str] = None
+
+
+class KnowledgeCreateRequest(BaseModel):
+    issue_type: str
+    risk: str
+    description: str
+    title: Optional[str] = None
+    suggestion: Optional[str] = None
+    source_thread_id: Optional[str] = None
+    source_agent: Optional[str] = None
+    tags: list[str] | None = None
+
+
+class ReviewKnowledgeCreateRequest(BaseModel):
+    tags: list[str] | None = None
 
 @router.post("/resume")
 async def resume_workflow(
@@ -224,3 +243,92 @@ async def get_audit_logs(
     db: Session = Depends(get_db),
 ):
     return list_audit_logs(db, resource_id=resource_id, action=action, actor=actor, limit=limit)
+
+
+@router.get("/knowledge")
+async def get_review_knowledge(
+    issue_type: str | None = None,
+    risk: str | None = None,
+    source_thread_id: str | None = None,
+    source_agent: str | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    return list_review_knowledge(
+        db,
+        issue_type=issue_type,
+        risk=risk,
+        source_thread_id=source_thread_id,
+        source_agent=source_agent,
+        limit=limit,
+    )
+
+
+@router.post("/knowledge")
+async def create_knowledge(
+    req: KnowledgeCreateRequest,
+    db: Session = Depends(get_db),
+    operator: str | None = Header(default=None, alias="X-Operator"),
+):
+    if not req.issue_type.strip():
+        raise HTTPException(status_code=400, detail="issue_type is required")
+    if req.risk not in {"LOW", "MEDIUM", "HIGH"}:
+        raise HTTPException(status_code=400, detail="risk must be LOW, MEDIUM or HIGH")
+    if not req.description.strip():
+        raise HTTPException(status_code=400, detail="description is required")
+
+    task = get_review_task_by_thread_id(db, req.source_thread_id) if req.source_thread_id else None
+    knowledge = create_review_knowledge(
+        db,
+        issue_type=req.issue_type.strip(),
+        risk=req.risk,
+        title=req.title.strip() if req.title else None,
+        description=req.description.strip(),
+        suggestion=req.suggestion.strip() if req.suggestion else None,
+        source_task_id=task.id if task else None,
+        source_thread_id=req.source_thread_id,
+        source_agent=req.source_agent,
+        tags=req.tags,
+        created_by=operator,
+    )
+    record_audit_log(
+        db,
+        actor=operator,
+        action="knowledge.create",
+        resource_type="review_knowledge",
+        resource_id=str(knowledge.id),
+        detail={"source_thread_id": req.source_thread_id, "issue_type": req.issue_type, "risk": req.risk},
+    )
+    return serialize_review_knowledge(knowledge)
+
+
+@router.post("/reviews/{thread_id}/knowledge")
+async def create_review_knowledge_from_task(
+    thread_id: str,
+    req: ReviewKnowledgeCreateRequest | None = None,
+    db: Session = Depends(get_db),
+    operator: str | None = Header(default=None, alias="X-Operator"),
+):
+    created = create_knowledge_from_review_task(
+        db,
+        thread_id=thread_id,
+        created_by=operator,
+        tags=req.tags if req else None,
+    )
+    if created is None:
+        raise HTTPException(status_code=404, detail="review task not found")
+
+    record_audit_log(
+        db,
+        actor=operator,
+        action="knowledge.create_from_review",
+        resource_type="review_task",
+        resource_id=thread_id,
+        detail={"created_count": len(created), "tags": req.tags if req else None},
+    )
+    return {
+        "status": "created",
+        "thread_id": thread_id,
+        "created_count": len(created),
+        "items": [serialize_review_knowledge(item) for item in created],
+    }

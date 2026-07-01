@@ -7,7 +7,7 @@
 
 MVP 功能主链路已完成：项目已经可以基于 mock GitLab MR payload 跑通「Webhook 触发 -> 多 Agent 并行审查 -> Summary 风险汇总 -> HIGH 风险人工审批 -> Approve/Modify 回写评论、Reject 结束流程」的闭环。
 
-企业化落地已开始：当前已引入 PostgreSQL + SQLAlchemy + Alembic，新增审查任务、Agent 输出、审批记录、GitLab 评论回写记录等核心表，并将待审批列表、审批结果、Review History 接入数据库。后续审计日志、权限模型等规划见 [企业化演进计划](docs/enterprise-plan.md)。
+企业化落地已开始：当前已引入 PostgreSQL + SQLAlchemy + Alembic，新增审查任务、Agent 输出、审批记录、GitLab 评论回写记录、审计日志、历史审查经验等核心表，并将待审批列表、审批结果、审查历史、任务详情接入数据库。后续权限模型与 pgvector 召回增强见 [企业化演进计划](docs/enterprise-plan.md)。
 
 ## 🛠️ 重点技术栈
 MVP 阶段使用以下技术栈：
@@ -261,7 +261,28 @@ curl -X POST http://127.0.0.1:8000/api/reviews/<thread_id>/comments/retry \
 curl "http://127.0.0.1:8000/api/audit-logs?resource_id=<thread_id>&limit=20"
 ```
 
-人工审批、任务重试、评论重试会读取请求头 `X-Operator` 作为操作者；未传时记录为 `anonymous`。
+手动创建历史审查经验：
+```bash
+curl -X POST http://127.0.0.1:8000/api/knowledge \
+  -H "Content-Type: application/json" \
+  -H "X-Operator: alice" \
+  -d '{"issue_type":"SQL 注入","risk":"HIGH","description":"发现用户输入直接拼接 SQL。","suggestion":"改为参数化查询。","tags":["security"]}'
+```
+
+从某次审查的 Agent 问题中沉淀历史经验：
+```bash
+curl -X POST http://127.0.0.1:8000/api/reviews/<thread_id>/knowledge \
+  -H "Content-Type: application/json" \
+  -H "X-Operator: alice" \
+  -d '{"tags":["人工确认"]}'
+```
+
+查询历史审查经验：
+```bash
+curl "http://127.0.0.1:8000/api/knowledge?risk=HIGH&limit=20"
+```
+
+人工审批、任务重试、评论重试、经验沉淀会读取请求头 `X-Operator` 作为操作者；未传时记录为 `anonymous`。
 
 任务状态会记录 `queued_at`、`started_at`、`failed_at`、`completed_at`、`retry_count`、`job_id` 与 `error_message`，用于排查 Worker 失败和重试链路。
 
@@ -271,6 +292,7 @@ http://127.0.0.1:8000/static/approval.html
 ```
 
 审批语义：
-- `Approve (Resume)`：恢复流程并回写 AI 生成的 GitLab 评论。
-- `Modify & Submit`：使用页面中人工修改后的评论回写 GitLab。
-- `Reject`：恢复并结束流程，不回写普通审查评论。
+- `通过并继续`：恢复流程并回写 AI 生成的 GitLab 评论。
+- `修改后提交`：使用页面中人工修改后的评论回写 GitLab。
+- `拒绝`：恢复并结束流程，不回写普通审查评论。
+- `沉淀经验`：将该任务中的 Agent 问题保存为历史审查经验。

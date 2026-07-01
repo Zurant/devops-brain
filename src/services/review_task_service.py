@@ -8,6 +8,7 @@ from src.models.agent_review import AgentReview
 from src.models.approval_record import ApprovalRecord
 from src.models.audit_log import AuditLog
 from src.models.gitlab_comment_record import GitLabCommentRecord
+from src.models.review_knowledge import ReviewKnowledge
 from src.models.review_task import ReviewTask
 
 
@@ -262,6 +263,119 @@ def list_audit_logs(
     return [serialize_audit_log(log) for log in logs]
 
 
+def create_review_knowledge(
+    db: Session,
+    *,
+    issue_type: str,
+    risk: str,
+    description: str,
+    title: str | None = None,
+    suggestion: str | None = None,
+    source_task_id: int | None = None,
+    source_thread_id: str | None = None,
+    source_agent: str | None = None,
+    tags: list[str] | None = None,
+    created_by: str | None = None,
+) -> ReviewKnowledge:
+    knowledge = ReviewKnowledge(
+        issue_type=issue_type,
+        risk=risk,
+        title=title,
+        description=description,
+        suggestion=suggestion,
+        source_task_id=source_task_id,
+        source_thread_id=source_thread_id,
+        source_agent=source_agent,
+        tags=tags,
+        created_by=created_by or "anonymous",
+    )
+    db.add(knowledge)
+    db.commit()
+    db.refresh(knowledge)
+    return knowledge
+
+
+def list_review_knowledge(
+    db: Session,
+    *,
+    issue_type: str | None = None,
+    risk: str | None = None,
+    source_thread_id: str | None = None,
+    source_agent: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    query = select(ReviewKnowledge)
+    if issue_type:
+        query = query.where(ReviewKnowledge.issue_type == issue_type)
+    if risk:
+        query = query.where(ReviewKnowledge.risk == risk)
+    if source_thread_id:
+        query = query.where(ReviewKnowledge.source_thread_id == source_thread_id)
+    if source_agent:
+        query = query.where(ReviewKnowledge.source_agent == source_agent)
+
+    items = db.scalars(query.order_by(ReviewKnowledge.created_at.desc()).limit(limit)).all()
+    return [serialize_review_knowledge(item) for item in items]
+
+
+def create_knowledge_from_review_task(
+    db: Session,
+    *,
+    thread_id: str,
+    created_by: str | None = None,
+    tags: list[str] | None = None,
+) -> list[ReviewKnowledge] | None:
+    task = get_review_task_by_thread_id(db, thread_id)
+    if task is None:
+        return None
+
+    created: list[ReviewKnowledge] = []
+    for review in task.agent_reviews:
+        for issue in review.issues or []:
+            if not isinstance(issue, dict):
+                continue
+            description = _pick_issue_text(issue, "description", "detail", "message", "reason")
+            title = _pick_issue_text(issue, "title", "name", "summary", "type")
+            suggestion = _pick_issue_text(issue, "suggestion", "fix", "recommendation", "advice")
+            issue_type = _pick_issue_text(issue, "type", "category", "rule", "title") or review.agent_name
+            risk = str(issue.get("risk") or issue.get("severity") or review.risk or task.final_risk_level or "MEDIUM").upper()
+
+            if not description and not title:
+                continue
+
+            created.append(
+                ReviewKnowledge(
+                    issue_type=issue_type[:128],
+                    risk=risk[:16],
+                    title=title,
+                    description=description or title or "未提供问题描述",
+                    suggestion=suggestion,
+                    source_task_id=task.id,
+                    source_thread_id=task.thread_id,
+                    source_agent=review.agent_name,
+                    tags=tags,
+                    created_by=created_by or "anonymous",
+                )
+            )
+
+    if not created:
+        return []
+
+    db.add_all(created)
+    db.commit()
+    for item in created:
+        db.refresh(item)
+    return created
+
+
+def _pick_issue_text(issue: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = issue.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
 def list_pending_reviews(db: Session) -> dict[str, dict[str, Any]]:
     tasks = db.scalars(
         select(ReviewTask)
@@ -304,6 +418,7 @@ def get_review_detail(db: Session, thread_id: str) -> dict[str, Any] | None:
     detail["gitlab_comment_records"] = [
         serialize_gitlab_comment_record(record) for record in task.gitlab_comment_records
     ]
+    detail["knowledge_entries"] = [serialize_review_knowledge(item) for item in task.knowledge_entries]
     detail["audit_logs"] = list_audit_logs(db, resource_id=thread_id, limit=50)
     return detail
 
@@ -387,6 +502,23 @@ def serialize_audit_log(log: AuditLog) -> dict[str, Any]:
         "resource_id": log.resource_id,
         "detail": log.detail,
         "created_at": log.created_at.isoformat() if log.created_at else None,
+    }
+
+
+def serialize_review_knowledge(item: ReviewKnowledge) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "issue_type": item.issue_type,
+        "risk": item.risk,
+        "title": item.title,
+        "description": item.description,
+        "suggestion": item.suggestion,
+        "source_task_id": item.source_task_id,
+        "source_thread_id": item.source_thread_id,
+        "source_agent": item.source_agent,
+        "tags": item.tags,
+        "created_by": item.created_by,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
     }
 
 

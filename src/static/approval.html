@@ -196,6 +196,7 @@
                     <pre>${escapeHtml(review.final_comment)}</pre>
                     <div class="actions">
                         <button class="btn-detail" onclick="loadReviewDetail('${escapeHtml(review.thread_id)}')">详情</button>
+                        <button class="btn-modify" onclick="createKnowledgeFromReview('${escapeHtml(review.thread_id)}')">沉淀经验</button>
                         ${review.status === 'failed' ? `<button class="btn-retry" onclick="retryReview('${escapeHtml(review.thread_id)}')">重试</button>` : ''}
                     </div>
                     <div id="detail-${escapeHtml(review.thread_id)}" class="detail" style="display:none;"></div>
@@ -243,6 +244,15 @@
                 </div>
             `).join('') || '<p class="meta">暂无审计日志。</p>';
 
+            const knowledgeEntries = (detail.knowledge_entries || []).map(item => `
+                <div class="record">
+                    <p class="meta">类型：${escapeHtml(item.issue_type)} · 风险：${escapeHtml(item.risk)} · 来源：${escapeHtml(item.source_agent || '-')} · 创建人：${escapeHtml(item.created_by || '-')}</p>
+                    ${item.title ? `<strong>${escapeHtml(item.title)}</strong>` : ''}
+                    <pre>${escapeHtml(item.description || '')}</pre>
+                    ${item.suggestion ? `<pre>${escapeHtml(item.suggestion)}</pre>` : ''}
+                </div>
+            `).join('') || '<p class="meta">暂无历史经验。</p>';
+
             return `
                 <h3>变更摘要</h3>
                 <p class="meta">文件：${escapeHtml(diffSummary.file_count || 0)} · 新增：${escapeHtml(diffSummary.additions || 0)} · 删除：${escapeHtml(diffSummary.deletions || 0)}</p>
@@ -254,6 +264,8 @@
                 ${approvals}
                 <h3>GitLab 回写记录</h3>
                 ${comments}
+                <h3>历史经验</h3>
+                ${knowledgeEntries}
                 <h3>审计日志</h3>
                 ${auditLogs}
             `;
@@ -328,6 +340,28 @@
                 }
             } catch (err) {
                 alert('重试 GitLab 评论异常。');
+            }
+        }
+
+        async function createKnowledgeFromReview(thread_id) {
+            try {
+                const res = await fetch(`/api/reviews/${thread_id}/knowledge`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...operatorHeaders() },
+                    body: JSON.stringify({ tags: ['人工确认'] })
+                });
+                if (res.ok) {
+                    const result = await res.json();
+                    alert(`已沉淀经验：${result.created_count} 条`);
+                    const detailBox = document.getElementById(`detail-${thread_id}`);
+                    if (detailBox) detailBox.innerHTML = '';
+                    loadReviewDetail(thread_id);
+                } else {
+                    const error = await res.json();
+                    alert(error.detail || '沉淀经验失败。');
+                }
+            } catch (err) {
+                alert('沉淀经验异常。');
             }
         }
 
