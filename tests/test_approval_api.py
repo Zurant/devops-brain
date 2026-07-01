@@ -370,6 +370,45 @@ def test_review_detail_returns_audit_records():
     assert body["audit_logs"][0]["actor"] == "alice"
 
 
+def test_review_detail_returns_referenced_knowledge_payload():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    task = ReviewTask(thread_id="thread-reference", project_id="1234", mr_iid="42", status="completed")
+    db.add(task)
+    db.commit()
+    db.add(
+        AgentReview(
+            task_id=task.id,
+            agent_name="security",
+            risk="HIGH",
+            issues={
+                "items": [{"title": "SQL 注入", "description": "拼接 SQL", "risk": "HIGH"}],
+                "referenced_knowledge": [
+                    {
+                        "id": 1,
+                        "title": "历史 SQL 注入经验",
+                        "risk": "HIGH",
+                        "suggestion": "使用参数化查询",
+                    }
+                ],
+            },
+        )
+    )
+    db.commit()
+    db.close()
+
+    try:
+        res = client.get("/api/reviews/thread-reference")
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    issues = res.json()["agent_reviews"][0]["issues"]
+    assert issues["items"][0]["title"] == "SQL 注入"
+    assert issues["referenced_knowledge"][0]["title"] == "历史 SQL 注入经验"
+
+
 def test_audit_logs_can_be_queried():
     session_factory = build_test_session()
     override_db(session_factory)
@@ -416,12 +455,104 @@ def test_knowledge_can_be_created_and_queried():
     assert create_res.status_code == 200
     assert create_res.json()["created_by"] == "alice"
     assert create_res.json()["issue_type"] == "SQL 注入"
+    assert create_res.json()["is_active"] is True
     assert query_res.status_code == 200
     assert query_res.json()[0]["suggestion"] == "改为参数化查询。"
 
     db = session_factory()
     audit_log = db.query(AuditLog).filter_by(action="knowledge.create").one()
     assert audit_log.actor == "alice"
+    db.close()
+
+
+def test_knowledge_can_be_updated_and_disabled():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    knowledge = ReviewKnowledge(
+        issue_type="sql_injection",
+        risk="HIGH",
+        title="旧标题",
+        description="旧描述",
+        suggestion="旧建议",
+        source_agent="security",
+        created_by="alice",
+    )
+    db.add(knowledge)
+    db.commit()
+    knowledge_id = knowledge.id
+    db.close()
+
+    try:
+        update_res = client.patch(
+            f"/api/knowledge/{knowledge_id}",
+            json={
+                "title": "参数化查询经验",
+                "description": "发现 SQL 拼接风险。",
+                "suggestion": "统一使用参数化查询。",
+                "is_active": False,
+            },
+            headers={"X-Operator": "bob"},
+        )
+        disabled_res = client.get("/api/knowledge?is_active=false")
+    finally:
+        clear_override_db()
+
+    assert update_res.status_code == 200
+    body = update_res.json()
+    assert body["title"] == "参数化查询经验"
+    assert body["is_active"] is False
+    assert disabled_res.status_code == 200
+    assert disabled_res.json()[0]["id"] == knowledge_id
+
+    db = session_factory()
+    audit_log = db.query(AuditLog).filter_by(action="knowledge.update").one()
+    assert audit_log.actor == "bob"
+    assert audit_log.resource_id == str(knowledge_id)
+    db.close()
+
+
+def test_knowledge_suggestions_can_be_backfilled_from_description():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    db.add_all(
+        [
+            ReviewKnowledge(
+                issue_type="maintainability",
+                risk="MEDIUM",
+                title="职责过多",
+                description="这个函数承担了过多职责。建议拆分为独立函数。",
+                suggestion=None,
+                created_by="alice",
+            ),
+            ReviewKnowledge(
+                issue_type="naming",
+                risk="LOW",
+                title="命名不清晰",
+                description="变量命名不清晰。",
+                suggestion=None,
+                created_by="alice",
+            ),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    try:
+        res = client.post("/api/knowledge/suggestions/backfill", headers={"X-Operator": "bob"})
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["updated_count"] == 1
+    assert body["items"][0]["suggestion"] == "建议拆分为独立函数。"
+
+    db = session_factory()
+    audit_log = db.query(AuditLog).filter_by(action="knowledge.backfill_suggestion").one()
+    assert audit_log.actor == "bob"
+    assert audit_log.detail["updated_count"] == 1
     db.close()
 
 
@@ -504,6 +635,41 @@ def test_review_knowledge_title_falls_back_to_description():
     item = res.json()["items"][0]
     assert item["title"] == "这个函数承担了过多职责，后续维护成本较高，建议拆分。"
     assert item["description"] == "这个函数承担了过多职责，后续维护成本较高，建议拆分。"
+    assert item["suggestion"] == "这个函数承担了过多职责，后续维护成本较高，建议拆分。"
+
+
+def test_review_knowledge_suggestion_supports_chinese_issue_keys():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    task = ReviewTask(thread_id="thread-chinese-suggestion", project_id="1234", mr_iid="42", status="completed")
+    db.add(task)
+    db.commit()
+    db.add(
+        AgentReview(
+            task_id=task.id,
+            agent_name="security",
+            risk="HIGH",
+            issues=[
+                {
+                    "title": "SQL 注入风险",
+                    "description": "登录接口拼接 SQL。",
+                    "修复建议": "使用参数化查询，并限制输入长度。",
+                }
+            ],
+        )
+    )
+    db.commit()
+    db.close()
+
+    try:
+        res = client.post("/api/reviews/thread-chinese-suggestion/knowledge")
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    item = res.json()["items"][0]
+    assert item["suggestion"] == "使用参数化查询，并限制输入长度。"
 
 
 def test_resume_records_failed_gitlab_comment():

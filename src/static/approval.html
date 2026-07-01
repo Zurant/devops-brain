@@ -20,10 +20,12 @@
         .btn-retry { background-color: #6f42c1; }
         .btn-detail { background-color: #344054; }
         .btn-refresh { background-color: #175cd3; }
+        .btn-secondary { background-color: #667085; }
         .filters { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 10px; align-items: end; margin-bottom: 16px; }
         .field label { display: block; color: #475467; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
         select, input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d5dd; border-radius: 4px; background: #fff; font-size: 14px; }
         .status { display: inline-block; padding: 3px 8px; border-radius: 4px; background: #eef1f5; color: #334; font-size: 12px; font-weight: 600; }
+        .status-disabled { background: #fff4f2; color: #b42318; }
         .meta { color: #667085; font-size: 13px; }
         .error { color: #b42318; background: #fff4f2; border: 1px solid #fecdca; padding: 10px; border-radius: 4px; font-size: 13px; }
         .detail { margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; }
@@ -31,57 +33,168 @@
         .record { border: 1px solid #eaecf0; border-radius: 4px; padding: 10px; margin-bottom: 8px; }
         pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 13px; }
         textarea { width: 100%; min-height: 140px; box-sizing: border-box; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
-        @media (max-width: 760px) { .filters { grid-template-columns: 1fr; } .header { align-items: flex-start; flex-direction: column; gap: 8px; } .actions { flex-wrap: wrap; } }
+        .tabs { display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid #d0d5dd; }
+        .tab { background: transparent; color: #475467; border-radius: 4px 4px 0 0; padding: 10px 14px; }
+        .tab.active { background: #175cd3; color: white; }
+        .panel { display: none; }
+        .panel.active { display: block; }
+        .form-grid { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 12px; }
+        .form-grid .wide { grid-column: 1 / -1; }
+        .knowledge-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr); gap: 16px; align-items: start; }
+        @media (max-width: 860px) { .filters, .form-grid, .knowledge-layout { grid-template-columns: 1fr; } .header { align-items: flex-start; flex-direction: column; gap: 8px; } .actions { flex-wrap: wrap; } }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>待审批审查</h1>
-        <div id="pending-list">加载中...</div>
-        <h1>审查历史</h1>
-        <div class="card">
-            <div class="filters">
-                <div class="field">
-                    <label for="filter-status">状态</label>
-                    <select id="filter-status">
-                        <option value="">全部</option>
-                        <option value="queued">已排队</option>
-                        <option value="running">运行中</option>
-                        <option value="waiting_human">待人工审批</option>
-                        <option value="completed">已完成</option>
-                        <option value="rejected">已拒绝</option>
-                        <option value="failed">失败</option>
-                    </select>
-                </div>
-                <div class="field">
-                    <label for="filter-risk">风险</label>
-                    <select id="filter-risk">
-                        <option value="">全部</option>
-                        <option value="HIGH">HIGH</option>
-                        <option value="MEDIUM">MEDIUM</option>
-                        <option value="LOW">LOW</option>
-                    </select>
-                </div>
-                <div class="field">
-                    <label for="filter-project">项目 ID</label>
-                    <input id="filter-project" placeholder="1234">
-                </div>
-                <div class="field">
-                    <label for="filter-limit">数量</label>
-                    <input id="filter-limit" type="number" min="1" max="200" value="50">
-                </div>
-                <div class="field">
-                    <label for="operator-name">操作人</label>
-                    <input id="operator-name" placeholder="alice">
-                </div>
-                <button class="btn-refresh" onclick="fetchHistory()">刷新</button>
-            </div>
-            <div class="actions">
-                <button class="btn-reject" onclick="showHighRiskReviews()">高风险</button>
-                <button class="btn-detail" onclick="clearHistoryFilters()">清空筛选</button>
-            </div>
+        <h1>DevOps Brain 审查工作台</h1>
+        <div class="tabs">
+            <button id="tab-approval" class="tab active" onclick="switchPanel('approval')">审批</button>
+            <button id="tab-history" class="tab" onclick="switchPanel('history')">历史</button>
+            <button id="tab-knowledge" class="tab" onclick="switchPanel('knowledge')">经验库</button>
         </div>
-        <div id="history-list">加载中...</div>
+
+        <section id="panel-approval" class="panel active">
+            <h2>待审批审查</h2>
+            <div id="pending-list">加载中...</div>
+        </section>
+
+        <section id="panel-history" class="panel">
+            <h2>审查历史</h2>
+            <div class="card">
+                <div class="filters">
+                    <div class="field">
+                        <label for="filter-status">状态</label>
+                        <select id="filter-status">
+                            <option value="">全部</option>
+                            <option value="queued">已排队</option>
+                            <option value="running">运行中</option>
+                            <option value="waiting_human">待人工审批</option>
+                            <option value="completed">已完成</option>
+                            <option value="rejected">已拒绝</option>
+                            <option value="failed">失败</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="filter-risk">风险</label>
+                        <select id="filter-risk">
+                            <option value="">全部</option>
+                            <option value="HIGH">HIGH</option>
+                            <option value="MEDIUM">MEDIUM</option>
+                            <option value="LOW">LOW</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="filter-project">项目 ID</label>
+                        <input id="filter-project" placeholder="1234">
+                    </div>
+                    <div class="field">
+                        <label for="filter-limit">数量</label>
+                        <input id="filter-limit" type="number" min="1" max="200" value="50">
+                    </div>
+                    <div class="field">
+                        <label for="operator-name">操作人</label>
+                        <input id="operator-name" placeholder="alice">
+                    </div>
+                    <button class="btn-refresh" onclick="fetchHistory()">刷新</button>
+                </div>
+                <div class="actions">
+                    <button class="btn-reject" onclick="showHighRiskReviews()">高风险</button>
+                    <button class="btn-detail" onclick="clearHistoryFilters()">清空筛选</button>
+                </div>
+            </div>
+            <div id="history-list">加载中...</div>
+        </section>
+
+        <section id="panel-knowledge" class="panel">
+            <h2>经验库管理</h2>
+            <div class="card">
+                <div class="filters">
+                    <div class="field">
+                        <label for="knowledge-risk-filter">风险</label>
+                        <select id="knowledge-risk-filter">
+                            <option value="">全部</option>
+                            <option value="HIGH">HIGH</option>
+                            <option value="MEDIUM">MEDIUM</option>
+                            <option value="LOW">LOW</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="knowledge-agent-filter">来源 Agent</label>
+                        <select id="knowledge-agent-filter">
+                            <option value="">全部</option>
+                            <option value="quality">quality</option>
+                            <option value="security">security</option>
+                            <option value="architecture">architecture</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="knowledge-active-filter">状态</label>
+                        <select id="knowledge-active-filter">
+                            <option value="">全部</option>
+                            <option value="true">启用</option>
+                            <option value="false">禁用</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="knowledge-limit-filter">数量</label>
+                        <input id="knowledge-limit-filter" type="number" min="1" max="200" value="50">
+                    </div>
+                    <button class="btn-refresh" onclick="fetchKnowledge()">刷新</button>
+                </div>
+            </div>
+
+            <div class="knowledge-layout">
+                <div id="knowledge-list">加载中...</div>
+                <div class="card">
+                    <h3 id="knowledge-form-title">新建经验</h3>
+                    <input id="knowledge-id" type="hidden">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label for="knowledge-title">标题</label>
+                            <input id="knowledge-title" placeholder="例如：SQL 参数拼接风险">
+                        </div>
+                        <div class="field">
+                            <label for="knowledge-type">类型</label>
+                            <input id="knowledge-type" placeholder="sql_injection">
+                        </div>
+                        <div class="field">
+                            <label for="knowledge-risk">风险</label>
+                            <select id="knowledge-risk">
+                                <option value="HIGH">HIGH</option>
+                                <option value="MEDIUM">MEDIUM</option>
+                                <option value="LOW">LOW</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="knowledge-agent">来源 Agent</label>
+                            <select id="knowledge-agent">
+                                <option value="">通用</option>
+                                <option value="quality">quality</option>
+                                <option value="security">security</option>
+                                <option value="architecture">architecture</option>
+                            </select>
+                        </div>
+                        <div class="field wide">
+                            <label for="knowledge-description">问题描述</label>
+                            <textarea id="knowledge-description" placeholder="描述问题产生原因、触发条件和影响"></textarea>
+                        </div>
+                        <div class="field wide">
+                            <label for="knowledge-suggestion">修复建议</label>
+                            <textarea id="knowledge-suggestion" placeholder="给出可执行的修复建议"></textarea>
+                        </div>
+                        <div class="field wide">
+                            <label for="knowledge-tags">标签</label>
+                            <input id="knowledge-tags" placeholder="多个标签用英文逗号分隔，例如：人工确认,支付链路">
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <button class="btn-approve" onclick="saveKnowledge()">保存</button>
+                        <button class="btn-secondary" onclick="resetKnowledgeForm()">清空</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
     </div>
 
     <script>
@@ -97,6 +210,16 @@
         function operatorHeaders() {
             const operator = document.getElementById('operator-name')?.value.trim();
             return operator ? { 'X-Operator': operator } : {};
+        }
+
+        function switchPanel(name) {
+            ['approval', 'history', 'knowledge'].forEach(item => {
+                document.getElementById(`panel-${item}`).classList.toggle('active', item === name);
+                document.getElementById(`tab-${item}`).classList.toggle('active', item === name);
+            });
+            if (name === 'approval') fetchPending();
+            if (name === 'history') fetchHistory();
+            if (name === 'knowledge') fetchKnowledge();
         }
 
         async function fetchPending() {
@@ -213,13 +336,7 @@
                 </div>
             `).join('') || '<p class="meta">暂无变更文件。</p>';
 
-            const agentReviews = (detail.agent_reviews || []).map(item => `
-                <div class="record">
-                    <p class="meta">Agent：${escapeHtml(item.agent_name)} · 风险：${escapeHtml(item.risk || '-')} · 模型：${escapeHtml(item.model_name || '-')}</p>
-                    ${item.error_message ? `<div class="error">${escapeHtml(item.error_message)}</div>` : ''}
-                    <pre>${escapeHtml(JSON.stringify(item.issues || [], null, 2))}</pre>
-                </div>
-            `).join('') || '<p class="meta">暂无 Agent 审查结果。</p>';
+            const agentReviews = (detail.agent_reviews || []).map(item => renderAgentReview(item)).join('') || '<p class="meta">暂无 Agent 审查结果。</p>';
 
             const approvals = (detail.approval_records || []).map(item => `
                 <div class="record">
@@ -268,6 +385,173 @@
                 ${knowledgeEntries}
                 <h3>审计日志</h3>
                 ${auditLogs}
+            `;
+        }
+
+        function tagsToText(tags) {
+            return (tags || []).join(',');
+        }
+
+        function parseTags(value) {
+            return String(value || '')
+                .split(',')
+                .map(item => item.trim())
+                .filter(Boolean);
+        }
+
+        async function fetchKnowledge() {
+            const list = document.getElementById('knowledge-list');
+            list.innerHTML = '<div class="card"><p class="meta">正在加载经验库...</p></div>';
+            try {
+                const params = new URLSearchParams();
+                const risk = document.getElementById('knowledge-risk-filter').value;
+                const sourceAgent = document.getElementById('knowledge-agent-filter').value;
+                const isActive = document.getElementById('knowledge-active-filter').value;
+                const limit = document.getElementById('knowledge-limit-filter').value || '50';
+                params.set('limit', limit);
+                if (risk) params.set('risk', risk);
+                if (sourceAgent) params.set('source_agent', sourceAgent);
+                if (isActive) params.set('is_active', isActive);
+                const res = await fetch(`/api/knowledge?${params.toString()}`);
+                const data = await res.json();
+                renderKnowledgeList(data);
+            } catch (err) {
+                list.innerHTML = '<div class="card"><div class="error">加载经验库失败。</div></div>';
+            }
+        }
+
+        function renderKnowledgeList(items) {
+            const list = document.getElementById('knowledge-list');
+            if (!items || items.length === 0) {
+                list.innerHTML = '<div class="card"><p>暂无历史经验。</p></div>';
+                return;
+            }
+            list.innerHTML = items.map(item => `
+                <div class="card">
+                    <div class="header">
+                        <h3>${escapeHtml(item.title || item.issue_type || '未命名经验')}</h3>
+                        <span class="status ${item.is_active ? '' : 'status-disabled'}">${item.is_active ? '启用' : '禁用'}</span>
+                    </div>
+                    <p class="meta">ID：${escapeHtml(item.id)} · 类型：${escapeHtml(item.issue_type)} · 风险：${escapeHtml(item.risk)} · 来源：${escapeHtml(item.source_agent || '通用')} · 创建人：${escapeHtml(item.created_by || '-')}</p>
+                    <p class="meta">来源线程：${escapeHtml(item.source_thread_id || '-')} · 创建时间：${escapeHtml(item.created_at || '-')} · 标签：${escapeHtml(tagsToText(item.tags) || '-')}</p>
+                    <pre>${escapeHtml(item.description || '')}</pre>
+                    ${item.suggestion ? `<pre>${escapeHtml(item.suggestion)}</pre>` : ''}
+                    <div class="actions">
+                        <button class="btn-modify" onclick='editKnowledge(${JSON.stringify(item).replaceAll("'", "&#039;")})'>编辑</button>
+                        <button class="${item.is_active ? 'btn-reject' : 'btn-approve'}" onclick="toggleKnowledge(${escapeHtml(item.id)}, ${item.is_active ? 'false' : 'true'})">${item.is_active ? '禁用' : '启用'}</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function editKnowledge(item) {
+            document.getElementById('knowledge-form-title').innerText = `编辑经验 #${item.id}`;
+            document.getElementById('knowledge-id').value = item.id;
+            document.getElementById('knowledge-title').value = item.title || '';
+            document.getElementById('knowledge-type').value = item.issue_type || '';
+            document.getElementById('knowledge-risk').value = item.risk || 'MEDIUM';
+            document.getElementById('knowledge-agent').value = item.source_agent || '';
+            document.getElementById('knowledge-description').value = item.description || '';
+            document.getElementById('knowledge-suggestion').value = item.suggestion || '';
+            document.getElementById('knowledge-tags').value = tagsToText(item.tags);
+        }
+
+        function resetKnowledgeForm() {
+            document.getElementById('knowledge-form-title').innerText = '新建经验';
+            document.getElementById('knowledge-id').value = '';
+            document.getElementById('knowledge-title').value = '';
+            document.getElementById('knowledge-type').value = '';
+            document.getElementById('knowledge-risk').value = 'HIGH';
+            document.getElementById('knowledge-agent').value = '';
+            document.getElementById('knowledge-description').value = '';
+            document.getElementById('knowledge-suggestion').value = '';
+            document.getElementById('knowledge-tags').value = '';
+        }
+
+        function buildKnowledgePayload() {
+            return {
+                title: document.getElementById('knowledge-title').value.trim() || null,
+                issue_type: document.getElementById('knowledge-type').value.trim(),
+                risk: document.getElementById('knowledge-risk').value,
+                source_agent: document.getElementById('knowledge-agent').value || null,
+                description: document.getElementById('knowledge-description').value.trim(),
+                suggestion: document.getElementById('knowledge-suggestion').value.trim() || null,
+                tags: parseTags(document.getElementById('knowledge-tags').value),
+            };
+        }
+
+        async function saveKnowledge() {
+            const id = document.getElementById('knowledge-id').value;
+            const payload = buildKnowledgePayload();
+            if (!payload.issue_type || !payload.description) {
+                alert('类型和问题描述不能为空。');
+                return;
+            }
+            try {
+                const res = await fetch(id ? `/api/knowledge/${id}` : '/api/knowledge', {
+                    method: id ? 'PATCH' : 'POST',
+                    headers: { 'Content-Type': 'application/json', ...operatorHeaders() },
+                    body: JSON.stringify(payload),
+                });
+                if (res.ok) {
+                    alert(id ? '经验已更新。' : '经验已创建。');
+                    resetKnowledgeForm();
+                    fetchKnowledge();
+                } else {
+                    const error = await res.json();
+                    alert(error.detail || '保存经验失败。');
+                }
+            } catch (err) {
+                alert('保存经验异常。');
+            }
+        }
+
+        async function toggleKnowledge(id, isActive) {
+            try {
+                const res = await fetch(`/api/knowledge/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', ...operatorHeaders() },
+                    body: JSON.stringify({ is_active: isActive }),
+                });
+                if (res.ok) {
+                    fetchKnowledge();
+                } else {
+                    const error = await res.json();
+                    alert(error.detail || '更新经验状态失败。');
+                }
+            } catch (err) {
+                alert('更新经验状态异常。');
+            }
+        }
+
+        function normalizeIssuesPayload(issues) {
+            if (issues && !Array.isArray(issues) && typeof issues === 'object') {
+                return {
+                    items: issues.items || [],
+                    referencedKnowledge: issues.referenced_knowledge || [],
+                };
+            }
+            return { items: issues || [], referencedKnowledge: [] };
+        }
+
+        function renderAgentReview(item) {
+            const payload = normalizeIssuesPayload(item.issues);
+            const knowledge = payload.referencedKnowledge.map(knowledgeItem => `
+                <div class="record">
+                    <p><strong>${escapeHtml(knowledgeItem.title || '未命名经验')}</strong></p>
+                    <p class="meta">类型：${escapeHtml(knowledgeItem.issue_type || '-')} · 风险：${escapeHtml(knowledgeItem.risk || '-')} · 来源：${escapeHtml(knowledgeItem.source_agent || '-')}</p>
+                    ${knowledgeItem.suggestion ? `<p>${escapeHtml(knowledgeItem.suggestion)}</p>` : ''}
+                </div>
+            `).join('') || '<p class="meta">暂无引用历史经验。</p>';
+
+            return `
+                <div class="record">
+                    <p class="meta">Agent：${escapeHtml(item.agent_name)} · 风险：${escapeHtml(item.risk || '-')} · 模型：${escapeHtml(item.model_name || '-')}</p>
+                    ${item.error_message ? `<div class="error">${escapeHtml(item.error_message)}</div>` : ''}
+                    <pre>${escapeHtml(JSON.stringify(payload.items, null, 2))}</pre>
+                    <h4>引用历史经验</h4>
+                    ${knowledge}
+                </div>
             `;
         }
 

@@ -7,6 +7,7 @@ from src.core.workflow import graph
 from src.api.globals import pending_reviews
 from src.db.session import get_db
 from src.services.review_task_service import (
+    backfill_empty_knowledge_suggestions,
     create_knowledge_from_review_task,
     create_review_knowledge,
     get_review_detail,
@@ -21,6 +22,7 @@ from src.services.review_task_service import (
     record_approval_decision,
     serialize_review_knowledge,
     update_task_from_graph_state,
+    update_review_knowledge,
 )
 
 router = APIRouter()
@@ -40,6 +42,17 @@ class KnowledgeCreateRequest(BaseModel):
     source_thread_id: Optional[str] = None
     source_agent: Optional[str] = None
     tags: list[str] | None = None
+
+
+class KnowledgeUpdateRequest(BaseModel):
+    issue_type: Optional[str] = None
+    risk: Optional[str] = None
+    description: Optional[str] = None
+    title: Optional[str] = None
+    suggestion: Optional[str] = None
+    source_agent: Optional[str] = None
+    tags: list[str] | None = None
+    is_active: Optional[bool] = None
 
 
 class ReviewKnowledgeCreateRequest(BaseModel):
@@ -251,6 +264,7 @@ async def get_review_knowledge(
     risk: str | None = None,
     source_thread_id: str | None = None,
     source_agent: str | None = None,
+    is_active: bool | None = None,
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
@@ -260,6 +274,7 @@ async def get_review_knowledge(
         risk=risk,
         source_thread_id=source_thread_id,
         source_agent=source_agent,
+        is_active=is_active,
         limit=limit,
     )
 
@@ -298,6 +313,67 @@ async def create_knowledge(
         resource_type="review_knowledge",
         resource_id=str(knowledge.id),
         detail={"source_thread_id": req.source_thread_id, "issue_type": req.issue_type, "risk": req.risk},
+    )
+    return serialize_review_knowledge(knowledge)
+
+
+@router.post("/knowledge/suggestions/backfill")
+async def backfill_knowledge_suggestions(
+    db: Session = Depends(get_db),
+    operator: str | None = Header(default=None, alias="X-Operator"),
+):
+    updated = backfill_empty_knowledge_suggestions(db)
+    record_audit_log(
+        db,
+        actor=operator,
+        action="knowledge.backfill_suggestion",
+        resource_type="review_knowledge",
+        resource_id="bulk",
+        detail={"updated_count": len(updated), "knowledge_ids": [item.id for item in updated]},
+    )
+    return {
+        "status": "updated",
+        "updated_count": len(updated),
+        "items": [serialize_review_knowledge(item) for item in updated],
+    }
+
+
+@router.patch("/knowledge/{knowledge_id}")
+async def update_knowledge(
+    knowledge_id: int,
+    req: KnowledgeUpdateRequest,
+    db: Session = Depends(get_db),
+    operator: str | None = Header(default=None, alias="X-Operator"),
+):
+    if req.issue_type is not None and not req.issue_type.strip():
+        raise HTTPException(status_code=400, detail="issue_type cannot be empty")
+    if req.risk is not None and req.risk not in {"LOW", "MEDIUM", "HIGH"}:
+        raise HTTPException(status_code=400, detail="risk must be LOW, MEDIUM or HIGH")
+    if req.description is not None and not req.description.strip():
+        raise HTTPException(status_code=400, detail="description cannot be empty")
+
+    knowledge = update_review_knowledge(
+        db,
+        knowledge_id,
+        issue_type=req.issue_type.strip() if req.issue_type is not None else None,
+        risk=req.risk,
+        title=req.title.strip() if req.title is not None else None,
+        description=req.description.strip() if req.description is not None else None,
+        suggestion=req.suggestion.strip() if req.suggestion is not None else None,
+        source_agent=req.source_agent.strip() if req.source_agent is not None else None,
+        tags=req.tags,
+        is_active=req.is_active,
+    )
+    if knowledge is None:
+        raise HTTPException(status_code=404, detail="review knowledge not found")
+
+    record_audit_log(
+        db,
+        actor=operator,
+        action="knowledge.update",
+        resource_type="review_knowledge",
+        resource_id=str(knowledge.id),
+        detail=req.model_dump(exclude_unset=True),
     )
     return serialize_review_knowledge(knowledge)
 

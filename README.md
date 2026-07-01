@@ -282,9 +282,27 @@ curl -X POST http://127.0.0.1:8000/api/reviews/<thread_id>/knowledge \
 curl "http://127.0.0.1:8000/api/knowledge?risk=HIGH&limit=20"
 ```
 
+编辑或禁用历史审查经验：
+```bash
+curl -X PATCH http://127.0.0.1:8000/api/knowledge/<knowledge_id> \
+  -H "Content-Type: application/json" \
+  -H "X-Operator: alice" \
+  -d '{"title":"参数化查询经验","suggestion":"统一使用参数化查询。","is_active":false}'
+```
+
+为历史数据补齐空的修复建议：
+```bash
+curl -X POST http://127.0.0.1:8000/api/knowledge/suggestions/backfill \
+  -H "X-Operator: alice"
+```
+
+审批工作台已内置“经验库”页签，可查看、筛选、新建、编辑、启用或禁用历史经验。禁用后的经验不会再被后续 Agent 召回。
+
 后续审查时，Quality / Security / Architecture Agent 会基于当前 diff 关键词召回少量相关历史经验，并注入到各自 Prompt 的“历史经验参考”段落中；数据库不可用或没有命中经验时，审查流程会继续正常执行。
 
-专家 Agent 的单条 issue 已要求输出结构化字段：`title`、`type`、`description`、`suggestion`、`risk`。从历史审查沉淀经验时，会优先使用这些字段填充 `review_knowledge`；如果旧结果只有 `description`，系统会用描述前缀自动生成标题。
+当专家 Agent 命中历史经验时，本次引用到的经验会随 Agent 审查结果保存，并在审批工作台详情中展示；Summary Agent 会在最终 GitLab 评论中增加“历史经验参考”章节，说明本次参考了哪些历史经验。
+
+专家 Agent 的单条 issue 已要求输出结构化字段：`title`、`type`、`description`、`suggestion`、`risk`。从历史审查沉淀经验时，会优先使用这些字段填充 `review_knowledge`；如果旧结果只有 `description`，系统会用描述前缀自动生成标题，并尝试从包含“建议/修复/应当/需要”等关键词的句子中抽取修复建议。
 
 人工审批、任务重试、评论重试、经验沉淀会读取请求头 `X-Operator` 作为操作者；未传时记录为 `anonymous`。
 

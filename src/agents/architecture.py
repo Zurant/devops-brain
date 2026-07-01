@@ -1,7 +1,7 @@
 from src.core.state import ReviewState
 from src.tools.llm_client import call_llm
 from src.agents import parse_agent_json
-from src.services.knowledge_retrieval_service import format_knowledge_prompt, retrieve_relevant_knowledge
+from src.agents.knowledge_context import attach_referenced_knowledge, build_agent_knowledge_context
 
 PROMPT_TEMPLATE = """
 请作为架构合规专家，检查以下代码是否符合 SOLID 原则，是否存在分层违规或过度耦合的问题。
@@ -29,8 +29,9 @@ PROMPT_TEMPLATE = """
 
 def architecture_agent(state: ReviewState):
     diff = state.get("diff_content", "")
-    knowledge_context = format_knowledge_prompt(retrieve_relevant_knowledge(diff, agent_name="architecture"))
+    knowledge_context, knowledge_items = build_agent_knowledge_context(diff, agent_name="architecture")
     prompt = PROMPT_TEMPLATE.replace("{knowledge_context}", knowledge_context).replace("{diff_content}", diff)
     response_text = call_llm(prompt, agent_name="architecture")
     result = parse_agent_json(response_text, "architecture")
+    attach_referenced_knowledge(result, knowledge_items)
     return {"reviews": [result]}

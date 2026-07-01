@@ -5,11 +5,12 @@ from src.agents import parse_agent_json
 
 PROMPT_TEMPLATE = """
 请作为首席技术架构师，汇总以下各个独立专家 Agent 对代码变更的审查结果。
+专家审查结果中可能包含 `referenced_knowledge`，表示该专家本次判断参考到的历史审查经验。
 请你仔细阅读每个专家的发现，并输出以下严格合法的 JSON 格式（注意：如果字符串内有换行，请使用 \\n 转义，不要输出原生换行符）：
 {
     "final_risk_level": "LOW", // 取所有专家中发现的最高风险等级 (只能是 LOW, MEDIUM, HIGH 之一)
     "summary_report": "简短的中文综合分析总结",
-    "final_comment": "适合直接作为 GitLab MR 评论的 Markdown 内容，包含所有具体发现"
+    "final_comment": "适合直接作为 GitLab MR 评论的 Markdown 内容，包含所有具体发现，并在末尾用“历史经验参考”章节列出本次引用到的经验标题、风险和建议；如果没有引用经验则写明暂无引用"
 }
 
 专家审查结果：

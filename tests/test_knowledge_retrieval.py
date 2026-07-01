@@ -54,6 +54,33 @@ def test_retrieve_relevant_knowledge_matches_diff_keywords(monkeypatch):
     assert items[0]["risk"] == "HIGH"
 
 
+def test_retrieve_relevant_knowledge_skips_disabled_items(monkeypatch):
+    session_factory = build_test_session()
+    db = session_factory()
+    db.add(
+        ReviewKnowledge(
+            issue_type="sql_injection",
+            risk="HIGH",
+            title="已禁用 SQL 注入经验",
+            description="登录接口拼接 SQL，应该使用参数化查询。",
+            suggestion="改为参数化查询。",
+            source_agent="security",
+            is_active=False,
+            created_by="alice",
+        )
+    )
+    db.commit()
+    db.close()
+    monkeypatch.setattr(knowledge_retrieval_service, "SessionLocal", session_factory)
+
+    items = knowledge_retrieval_service.retrieve_relevant_knowledge(
+        "cursor.execute('SELECT * FROM users WHERE name=' + username)",
+        agent_name="security",
+    )
+
+    assert items == []
+
+
 def test_format_knowledge_prompt_includes_review_experience():
     prompt = knowledge_retrieval_service.format_knowledge_prompt(
         [

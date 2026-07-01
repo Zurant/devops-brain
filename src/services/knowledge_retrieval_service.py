@@ -26,6 +26,7 @@ def retrieve_relevant_knowledge(
             candidates = db.scalars(
                 select(ReviewKnowledge)
                 .where(
+                    ReviewKnowledge.is_active.is_(True),
                     (ReviewKnowledge.source_agent == agent_name)
                     | (ReviewKnowledge.source_agent.is_(None))
                     | (ReviewKnowledge.risk == "HIGH")

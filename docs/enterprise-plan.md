@@ -365,10 +365,11 @@ Done When：
 - 审批工作台历史任务卡片已提供“沉淀经验”入口，详情页可查看关联历史经验
 - 新增基础关键词召回，专家 Agent 会将命中的历史经验注入 Prompt
 - 专家 Agent issue 输出已结构化为 `title/type/description/suggestion/risk`，沉淀经验时会自动保留标题和修复建议；旧格式仅有 `description` 时会生成标题兜底
+- 命中的历史经验会随专家 Agent 审查结果保存，审批工作台详情可查看引用记录，Summary Agent 最终评论会输出“历史经验参考”章节
+- 审批工作台已新增经验库管理页，支持经验筛选、新建、编辑、启用/禁用；禁用经验不会参与后续召回
 
 剩余增强：
 - 引入 pgvector 并生成 embedding
-- Summary 报告引用命中的历史经验
 
 ## 8. MVP 到企业版的迁移原则
 

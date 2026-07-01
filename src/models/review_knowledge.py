@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
@@ -22,6 +22,7 @@ class ReviewKnowledge(Base):
     source_thread_id: Mapped[str | None] = mapped_column(String(64), index=True)
     source_agent: Mapped[str | None] = mapped_column(String(64), index=True)
     tags: Mapped[list[str] | None] = mapped_column(PortableJSONB)
+    is_active: Mapped[bool] = mapped_column(Boolean, index=True, nullable=False, default=True, server_default="true")
     created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="anonymous")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

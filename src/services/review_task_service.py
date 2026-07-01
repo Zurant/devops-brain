@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -122,7 +123,7 @@ def replace_agent_reviews(db: Session, task: ReviewTask, reviews: list[dict[str,
                 task_id=task.id,
                 agent_name=str(review.get("agent", "unknown")),
                 risk=review.get("risk"),
-                issues=review.get("issues"),
+                issues=build_agent_review_issues_payload(review),
                 raw_response=review.get("raw_response"),
                 error_message=review.get("error"),
                 token_usage=review.get("token_usage"),
@@ -302,6 +303,7 @@ def list_review_knowledge(
     risk: str | None = None,
     source_thread_id: str | None = None,
     source_agent: str | None = None,
+    is_active: bool | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     query = select(ReviewKnowledge)
@@ -313,9 +315,73 @@ def list_review_knowledge(
         query = query.where(ReviewKnowledge.source_thread_id == source_thread_id)
     if source_agent:
         query = query.where(ReviewKnowledge.source_agent == source_agent)
+    if is_active is not None:
+        query = query.where(ReviewKnowledge.is_active.is_(is_active))
 
     items = db.scalars(query.order_by(ReviewKnowledge.created_at.desc()).limit(limit)).all()
     return [serialize_review_knowledge(item) for item in items]
+
+
+def update_review_knowledge(
+    db: Session,
+    knowledge_id: int,
+    *,
+    issue_type: str | None = None,
+    risk: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    suggestion: str | None = None,
+    source_agent: str | None = None,
+    tags: list[str] | None = None,
+    is_active: bool | None = None,
+) -> ReviewKnowledge | None:
+    knowledge = db.get(ReviewKnowledge, knowledge_id)
+    if knowledge is None:
+        return None
+
+    if issue_type is not None:
+        knowledge.issue_type = issue_type
+    if risk is not None:
+        knowledge.risk = risk
+    if title is not None:
+        knowledge.title = title
+    if description is not None:
+        knowledge.description = description
+    if suggestion is not None:
+        knowledge.suggestion = suggestion
+    if source_agent is not None:
+        knowledge.source_agent = source_agent
+    if tags is not None:
+        knowledge.tags = tags
+    if is_active is not None:
+        knowledge.is_active = is_active
+
+    db.commit()
+    db.refresh(knowledge)
+    return knowledge
+
+
+def backfill_empty_knowledge_suggestions(db: Session) -> list[ReviewKnowledge]:
+    items = db.scalars(
+        select(ReviewKnowledge).where(
+            (ReviewKnowledge.suggestion.is_(None)) | (ReviewKnowledge.suggestion == "")
+        )
+    ).all()
+    updated: list[ReviewKnowledge] = []
+    for item in items:
+        suggestion = build_suggestion_from_description(item.description)
+        if not suggestion:
+            continue
+        item.suggestion = suggestion
+        updated.append(item)
+
+    if not updated:
+        return []
+
+    db.commit()
+    for item in updated:
+        db.refresh(item)
+    return updated
 
 
 def create_knowledge_from_review_task(
@@ -331,12 +397,22 @@ def create_knowledge_from_review_task(
 
     created: list[ReviewKnowledge] = []
     for review in task.agent_reviews:
-        for issue in review.issues or []:
+        for issue in iter_review_issues(review.issues):
             if not isinstance(issue, dict):
                 continue
             description = _pick_issue_text(issue, "description", "detail", "message", "reason")
             title = _pick_issue_text(issue, "title", "name", "summary", "type")
-            suggestion = _pick_issue_text(issue, "suggestion", "fix", "recommendation", "advice")
+            suggestion = _pick_issue_text(
+                issue,
+                "suggestion",
+                "fix",
+                "recommendation",
+                "advice",
+                "修复建议",
+                "建议",
+                "解决方案",
+                "处理建议",
+            )
             issue_type = _pick_issue_text(issue, "type", "category", "rule", "title") or review.agent_name
             risk = str(issue.get("risk") or issue.get("severity") or review.risk or task.final_risk_level or "MEDIUM").upper()
 
@@ -344,6 +420,8 @@ def create_knowledge_from_review_task(
                 continue
             if not title and description:
                 title = build_title_from_description(description)
+            if not suggestion and description:
+                suggestion = build_suggestion_from_description(description)
 
             created.append(
                 ReviewKnowledge(
@@ -383,6 +461,39 @@ def build_title_from_description(description: str, *, max_length: int = 60) -> s
     if len(normalized) <= max_length:
         return normalized
     return normalized[:max_length].rstrip() + "..."
+
+
+def build_suggestion_from_description(description: str) -> str | None:
+    normalized = " ".join(description.split())
+    if not normalized:
+        return None
+
+    sentences = re.split(r"(?<=[。！？!?；;])\s*", normalized)
+    suggestion_keywords = ("建议", "修复", "应当", "应该", "需要", "可以", "改为", "使用", "避免")
+    for sentence in sentences:
+        cleaned = sentence.strip()
+        if cleaned and any(keyword in cleaned for keyword in suggestion_keywords):
+            return cleaned
+    return None
+
+
+def build_agent_review_issues_payload(review: dict[str, Any]) -> dict[str, Any] | list[dict[str, Any]] | None:
+    issues = review.get("issues")
+    referenced_knowledge = review.get("referenced_knowledge")
+    if referenced_knowledge:
+        return {
+            "items": issues or [],
+            "referenced_knowledge": referenced_knowledge,
+        }
+    return issues
+
+
+def iter_review_issues(issues_payload: Any) -> list[dict[str, Any]]:
+    if isinstance(issues_payload, dict):
+        issues_payload = issues_payload.get("items", [])
+    if isinstance(issues_payload, list):
+        return [item for item in issues_payload if isinstance(item, dict)]
+    return []
 
 
 def list_pending_reviews(db: Session) -> dict[str, dict[str, Any]]:
@@ -526,6 +637,7 @@ def serialize_review_knowledge(item: ReviewKnowledge) -> dict[str, Any]:
         "source_thread_id": item.source_thread_id,
         "source_agent": item.source_agent,
         "tags": item.tags,
+        "is_active": item.is_active,
         "created_by": item.created_by,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
