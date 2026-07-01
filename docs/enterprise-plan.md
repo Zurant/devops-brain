@@ -236,6 +236,7 @@ graph LR
 - Phase E2 已完成第一版落地：`/api/pending`、`/api/resume`、`/api/history` 已接入数据库，审批页面已展示 Review History。
 - Phase E3 已完成第一版落地：Webhook 已改为 Redis/RQ 异步入队，Worker 后台执行 LangGraph，任务运行状态、失败原因与重试次数已落库。
 - Phase E4 已完成第一版落地：Agent 输出、GitLab 评论回写成功/失败记录已落库，提供任务详情接口与失败评论重试接口。
+- Phase E5 已开始第一版落地：历史列表已支持按状态、风险、项目筛选，审批页面已补充工作台筛选栏与任务详情展开。
 
 ### Phase E1: 数据库基础设施
 
@@ -333,6 +334,12 @@ Done When：
 Done When：
 - 用户可以从页面完成任务查看、审批、追踪历史
 - Reject 后任务不再“消失”，而是进入历史列表
+
+已完成：
+- `/api/history` 支持 `status`、`risk`、`project_id`、`limit` 查询参数
+- 审批页面 Review History 支持按状态、风险、项目筛选
+- 任务列表可展开详情，查看 diff 摘要、Agent 输出、审批记录和 GitLab 评论回写记录
+- 审批页面提供 HIGH 风险快速筛选入口
 
 ### Phase E6: 历史审查经验库
 

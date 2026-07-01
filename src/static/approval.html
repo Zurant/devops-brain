@@ -6,7 +6,7 @@
     <title>DevOps Brain - Approval Dashboard</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f5f7; margin: 0; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
+        .container { max-width: 1040px; margin: 0 auto; }
         .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
         .risk-HIGH { color: #d9534f; font-weight: bold; }
@@ -19,6 +19,10 @@
         .btn-modify { background-color: #337ab7; }
         .btn-retry { background-color: #6f42c1; }
         .btn-detail { background-color: #344054; }
+        .btn-refresh { background-color: #175cd3; }
+        .filters { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 10px; align-items: end; margin-bottom: 16px; }
+        .field label { display: block; color: #475467; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+        select, input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #d0d5dd; border-radius: 4px; background: #fff; font-size: 14px; }
         .status { display: inline-block; padding: 3px 8px; border-radius: 4px; background: #eef1f5; color: #334; font-size: 12px; font-weight: 600; }
         .meta { color: #667085; font-size: 13px; }
         .error { color: #b42318; background: #fff4f2; border: 1px solid #fecdca; padding: 10px; border-radius: 4px; font-size: 13px; }
@@ -27,6 +31,7 @@
         .record { border: 1px solid #eaecf0; border-radius: 4px; padding: 10px; margin-bottom: 8px; }
         pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 13px; }
         textarea { width: 100%; min-height: 140px; box-sizing: border-box; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+        @media (max-width: 760px) { .filters { grid-template-columns: 1fr; } .header { align-items: flex-start; flex-direction: column; gap: 8px; } .actions { flex-wrap: wrap; } }
     </style>
 </head>
 <body>
@@ -34,6 +39,44 @@
         <h1>Pending Reviews</h1>
         <div id="pending-list">Loading...</div>
         <h1>Review History</h1>
+        <div class="card">
+            <div class="filters">
+                <div class="field">
+                    <label for="filter-status">Status</label>
+                    <select id="filter-status">
+                        <option value="">All</option>
+                        <option value="queued">Queued</option>
+                        <option value="running">Running</option>
+                        <option value="waiting_human">Waiting Human</option>
+                        <option value="completed">Completed</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="failed">Failed</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="filter-risk">Risk</label>
+                    <select id="filter-risk">
+                        <option value="">All</option>
+                        <option value="HIGH">HIGH</option>
+                        <option value="MEDIUM">MEDIUM</option>
+                        <option value="LOW">LOW</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="filter-project">Project ID</label>
+                    <input id="filter-project" placeholder="1234">
+                </div>
+                <div class="field">
+                    <label for="filter-limit">Limit</label>
+                    <input id="filter-limit" type="number" min="1" max="200" value="50">
+                </div>
+                <button class="btn-refresh" onclick="fetchHistory()">Refresh</button>
+            </div>
+            <div class="actions">
+                <button class="btn-reject" onclick="showHighRiskReviews()">HIGH Risk</button>
+                <button class="btn-detail" onclick="clearHistoryFilters()">Clear</button>
+            </div>
+        </div>
         <div id="history-list">Loading...</div>
     </div>
 
@@ -59,7 +102,16 @@
 
         async function fetchHistory() {
             try {
-                const res = await fetch('/api/history?limit=50');
+                const params = new URLSearchParams();
+                const status = document.getElementById('filter-status')?.value;
+                const risk = document.getElementById('filter-risk')?.value;
+                const projectId = document.getElementById('filter-project')?.value.trim();
+                const limit = document.getElementById('filter-limit')?.value || '50';
+                params.set('limit', limit);
+                if (status) params.set('status', status);
+                if (risk) params.set('risk', risk);
+                if (projectId) params.set('project_id', projectId);
+                const res = await fetch(`/api/history?${params.toString()}`);
                 const data = await res.json();
                 renderHistory(data);
             } catch (err) {
@@ -144,6 +196,13 @@
         }
 
         function renderReviewDetail(detail) {
+            const diffSummary = detail.diff_summary || {};
+            const diffFiles = (diffSummary.files || []).map(item => `
+                <div class="record">
+                    <p class="meta">${escapeHtml(item.path)} · +${escapeHtml(item.additions)} · -${escapeHtml(item.deletions)}</p>
+                </div>
+            `).join('') || '<p class="meta">No diff files.</p>';
+
             const agentReviews = (detail.agent_reviews || []).map(item => `
                 <div class="record">
                     <p class="meta">Agent: ${escapeHtml(item.agent_name)} · Risk: ${escapeHtml(item.risk || '-')} · Model: ${escapeHtml(item.model_name || '-')}</p>
@@ -169,6 +228,10 @@
             `).join('') || '<p class="meta">No GitLab comment records.</p>';
 
             return `
+                <h3>Diff Summary</h3>
+                <p class="meta">Files: ${escapeHtml(diffSummary.file_count || 0)} · Additions: ${escapeHtml(diffSummary.additions || 0)} · Deletions: ${escapeHtml(diffSummary.deletions || 0)}</p>
+                ${diffFiles}
+                ${diffSummary.preview ? `<pre>${escapeHtml(diffSummary.preview)}</pre>` : ''}
                 <h3>Agent Reviews</h3>
                 ${agentReviews}
                 <h3>Approval Records</h3>
@@ -216,6 +279,20 @@
             } catch (err) {
                 alert('Error retrying review.');
             }
+        }
+
+        function showHighRiskReviews() {
+            document.getElementById('filter-risk').value = 'HIGH';
+            document.getElementById('filter-status').value = '';
+            fetchHistory();
+        }
+
+        function clearHistoryFilters() {
+            document.getElementById('filter-status').value = '';
+            document.getElementById('filter-risk').value = '';
+            document.getElementById('filter-project').value = '';
+            document.getElementById('filter-limit').value = '50';
+            fetchHistory();
         }
 
         async function retryGitlabComment(thread_id) {

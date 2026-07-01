@@ -127,8 +127,14 @@ async def get_pending_reviews(db: Session = Depends(get_db)):
 
 
 @router.get("/history")
-async def get_review_history(limit: int = 50, db: Session = Depends(get_db)):
-    return list_review_history(db, limit=limit)
+async def get_review_history(
+    limit: int = 50,
+    status: str | None = None,
+    risk: str | None = None,
+    project_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    return list_review_history(db, limit=limit, status=status, risk=risk, project_id=project_id)
 
 
 @router.get("/reviews/{thread_id}")

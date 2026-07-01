@@ -140,8 +140,10 @@ def update_task_from_graph_state(db: Session, thread_id: str, values: dict[str, 
     task.final_comment = values.get("final_comment")
     task.updated_at = datetime.now(timezone.utc)
     task.error_message = None
-    if status in {"completed", "rejected", "failed"}:
+    if status in {"completed", "rejected"}:
         task.completed_at = datetime.now(timezone.utc)
+    if status == "failed":
+        task.failed_at = datetime.now(timezone.utc)
 
     replace_agent_reviews(db, task, values.get("reviews"))
     db.commit()
@@ -226,8 +228,23 @@ def list_pending_reviews(db: Session) -> dict[str, dict[str, Any]]:
     return {task.thread_id: serialize_review_task(task) for task in tasks}
 
 
-def list_review_history(db: Session, limit: int = 50) -> list[dict[str, Any]]:
-    tasks = db.scalars(select(ReviewTask).order_by(ReviewTask.created_at.desc()).limit(limit)).all()
+def list_review_history(
+    db: Session,
+    limit: int = 50,
+    *,
+    status: str | None = None,
+    risk: str | None = None,
+    project_id: str | None = None,
+) -> list[dict[str, Any]]:
+    query = select(ReviewTask)
+    if status:
+        query = query.where(ReviewTask.status == status)
+    if risk:
+        query = query.where(ReviewTask.final_risk_level == risk)
+    if project_id:
+        query = query.where(ReviewTask.project_id == project_id)
+
+    tasks = db.scalars(query.order_by(ReviewTask.created_at.desc()).limit(limit)).all()
     return [serialize_review_task(task) for task in tasks]
 
 
@@ -237,12 +254,48 @@ def get_review_detail(db: Session, thread_id: str) -> dict[str, Any] | None:
         return None
 
     detail = serialize_review_task(task)
+    diff_content = (task.initial_state or {}).get("diff_content") if task.initial_state else None
+    detail["diff_summary"] = summarize_diff_content(diff_content)
     detail["agent_reviews"] = [serialize_agent_review(review) for review in task.agent_reviews]
     detail["approval_records"] = [serialize_approval_record(record) for record in task.approval_records]
     detail["gitlab_comment_records"] = [
         serialize_gitlab_comment_record(record) for record in task.gitlab_comment_records
     ]
     return detail
+
+
+def summarize_diff_content(diff_content: str | None) -> dict[str, Any]:
+    if not diff_content:
+        return {"files": [], "file_count": 0, "additions": 0, "deletions": 0, "preview": ""}
+
+    files: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    additions = 0
+    deletions = 0
+
+    for line in diff_content.splitlines():
+        if line.startswith("# File: "):
+            current = {"path": line.removeprefix("# File: ").strip(), "additions": 0, "deletions": 0}
+            files.append(current)
+            continue
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            additions += 1
+            if current is not None:
+                current["additions"] += 1
+        elif line.startswith("-"):
+            deletions += 1
+            if current is not None:
+                current["deletions"] += 1
+
+    return {
+        "files": files,
+        "file_count": len(files),
+        "additions": additions,
+        "deletions": deletions,
+        "preview": diff_content[:2000],
+    }
 
 
 def serialize_agent_review(review: AgentReview) -> dict[str, Any]:

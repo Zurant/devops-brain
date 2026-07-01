@@ -232,10 +232,17 @@ curl http://127.0.0.1:8000/api/pending
 curl http://127.0.0.1:8000/api/history
 ```
 
+按状态、风险和项目筛选历史：
+```bash
+curl "http://127.0.0.1:8000/api/history?status=completed&risk=HIGH&project_id=1234&limit=20"
+```
+
 查看单个任务详情，包括 Agent 输出、审批记录和 GitLab 评论回写记录：
 ```bash
 curl http://127.0.0.1:8000/api/reviews/<thread_id>
 ```
+
+任务详情会基于入队时保存的 `diff_content` 返回 `diff_summary`，包含变更文件、增删行数和 diff 预览。
 
 失败任务重新入队：
 ```bash

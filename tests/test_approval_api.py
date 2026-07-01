@@ -243,6 +243,53 @@ def test_pending_and_history_read_from_database():
     assert next(item for item in history if item["thread_id"] == "thread-done")["approval_decision"] == "approve"
 
 
+def test_history_supports_enterprise_filters():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    db.add_all(
+        [
+            ReviewTask(
+                thread_id="thread-high-waiting",
+                project_id="1234",
+                mr_iid="42",
+                status="waiting_human",
+                final_risk_level="HIGH",
+            ),
+            ReviewTask(
+                thread_id="thread-low-completed",
+                project_id="1234",
+                mr_iid="43",
+                status="completed",
+                final_risk_level="LOW",
+            ),
+            ReviewTask(
+                thread_id="thread-high-other-project",
+                project_id="5678",
+                mr_iid="44",
+                status="completed",
+                final_risk_level="HIGH",
+            ),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    try:
+        status_res = client.get("/api/history?status=completed")
+        risk_project_res = client.get("/api/history?risk=HIGH&project_id=1234")
+    finally:
+        clear_override_db()
+
+    assert status_res.status_code == 200
+    assert {item["thread_id"] for item in status_res.json()} == {
+        "thread-low-completed",
+        "thread-high-other-project",
+    }
+    assert risk_project_res.status_code == 200
+    assert [item["thread_id"] for item in risk_project_res.json()] == ["thread-high-waiting"]
+
+
 def test_review_detail_returns_audit_records():
     session_factory = build_test_session()
     override_db(session_factory)
@@ -254,6 +301,9 @@ def test_review_detail_returns_audit_records():
         status="completed",
         final_risk_level="MEDIUM",
         final_comment="最终评论",
+        initial_state={
+            "diff_content": "# File: src/app.py\n@@\n-old_call()\n+new_call()\n+audit_log()\n# File: README.md\n@@\n-old\n+new"
+        },
     )
     db.add(task)
     db.commit()
@@ -283,6 +333,10 @@ def test_review_detail_returns_audit_records():
     assert res.status_code == 200
     body = res.json()
     assert body["thread_id"] == "thread-detail"
+    assert body["diff_summary"]["file_count"] == 2
+    assert body["diff_summary"]["additions"] == 3
+    assert body["diff_summary"]["deletions"] == 2
+    assert body["diff_summary"]["files"][0]["path"] == "src/app.py"
     assert body["agent_reviews"][0]["agent_name"] == "security"
     assert body["approval_records"][0]["decision"] == "approve"
     assert body["gitlab_comment_records"][0]["success"] is True
