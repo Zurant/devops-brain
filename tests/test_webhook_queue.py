@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from src.api.server import app
 from src.db.session import get_db
-from src.models import GitLabCommentRecord, ReviewTask
+from src.models import AuditLog, GitLabCommentRecord, ReviewTask
 from src.services.review_orchestrator import run_review_job
 from tests.test_approval_api import build_test_session, clear_override_db, override_db
 
@@ -179,7 +179,7 @@ def test_retry_failed_review_enqueues_saved_initial_state():
 
     try:
         with patch("src.api.routes.webhook.get_review_queue", return_value=queue):
-            res = client.post("/api/reviews/retry-thread/retry")
+            res = client.post("/api/reviews/retry-thread/retry", headers={"X-Operator": "alice"})
     finally:
         clear_override_db()
 
@@ -196,4 +196,9 @@ def test_retry_failed_review_enqueues_saved_initial_state():
     assert task.job_id == "retry-job-1"
     assert task.retry_count == 2
     assert task.error_message is None
+    audit_log = db.query(AuditLog).filter_by(resource_id="retry-thread").one()
+    assert audit_log.actor == "alice"
+    assert audit_log.action == "review.retry"
+    assert audit_log.detail["job_id"] == "retry-job-1"
+    assert audit_log.detail["retry_count"] == 2
     db.close()

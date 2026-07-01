@@ -237,6 +237,7 @@ graph LR
 - Phase E3 已完成第一版落地：Webhook 已改为 Redis/RQ 异步入队，Worker 后台执行 LangGraph，任务运行状态、失败原因与重试次数已落库。
 - Phase E4 已完成第一版落地：Agent 输出、GitLab 评论回写成功/失败记录已落库，提供任务详情接口与失败评论重试接口。
 - Phase E5 已开始第一版落地：历史列表已支持按状态、风险、项目筛选，审批页面已补充工作台筛选栏与任务详情展开。
+- 审计能力已开始第一版落地：新增 `audit_logs`，审批、任务重试、评论重试会记录操作者与操作详情。
 
 ### Phase E1: 数据库基础设施
 
@@ -275,7 +276,7 @@ Done When：
 - 前端已补充 Review History 区域
 
 剩余增强：
-- 引入真实操作者身份，填充 `approval_records.operator`
+- 接入企业登录态替代 `X-Operator` 请求头
 - 增加任务详情接口，展示每个 Agent 的审查输出
 - 将 GitLab 评论回写记录拆到 `gitlab_comment_records`
 - Approve/Modify/Reject 都有历史记录

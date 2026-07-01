@@ -10,7 +10,7 @@ from src.api.globals import pending_reviews
 from src.api.server import app
 from src.db.base import Base
 from src.db.session import get_db
-from src.models import AgentReview, ApprovalRecord, GitLabCommentRecord, ReviewTask
+from src.models import AgentReview, ApprovalRecord, AuditLog, GitLabCommentRecord, ReviewTask
 
 
 client = TestClient(app)
@@ -68,7 +68,11 @@ def test_resume_approve_posts_final_comment():
 
     try:
         with patch("src.api.routes.approval.graph", graph), patch("src.tools.gitlab_client.post_mr_comment") as post_comment:
-            res = client.post("/api/resume", json={"thread_id": "thread-approve", "decision": "approve"})
+            res = client.post(
+                "/api/resume",
+                json={"thread_id": "thread-approve", "decision": "approve"},
+                headers={"X-Operator": "alice"},
+            )
     finally:
         clear_override_db()
 
@@ -85,11 +89,15 @@ def test_resume_approve_posts_final_comment():
     task = db.query(ReviewTask).filter_by(thread_id="thread-approve").one()
     record = db.query(ApprovalRecord).filter_by(thread_id="thread-approve").one()
     comment_record = db.query(GitLabCommentRecord).filter_by(thread_id="thread-approve").one()
+    audit_log = db.query(AuditLog).filter_by(resource_id="thread-approve").one()
     assert task.status == "completed"
     assert record.decision == "approve"
+    assert record.operator == "alice"
     assert record.comment_posted is True
     assert comment_record.source == "approve"
     assert comment_record.success is True
+    assert audit_log.actor == "alice"
+    assert audit_log.action == "review.approve"
     db.close()
 
 
@@ -320,6 +328,13 @@ def test_review_detail_returns_audit_records():
                 source="approve",
                 success=True,
             ),
+            AuditLog(
+                actor="alice",
+                action="review.approve",
+                resource_type="review_task",
+                resource_id="thread-detail",
+                detail={"comment_posted": True},
+            ),
         ]
     )
     db.commit()
@@ -340,6 +355,29 @@ def test_review_detail_returns_audit_records():
     assert body["agent_reviews"][0]["agent_name"] == "security"
     assert body["approval_records"][0]["decision"] == "approve"
     assert body["gitlab_comment_records"][0]["success"] is True
+    assert body["audit_logs"][0]["actor"] == "alice"
+
+
+def test_audit_logs_can_be_queried():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    db.add_all(
+        [
+            AuditLog(actor="alice", action="review.approve", resource_type="review_task", resource_id="thread-a", detail={}),
+            AuditLog(actor="bob", action="review.reject", resource_type="review_task", resource_id="thread-b", detail={}),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    try:
+        res = client.get("/api/audit-logs?actor=alice")
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    assert [item["resource_id"] for item in res.json()] == ["thread-a"]
 
 
 def test_resume_records_failed_gitlab_comment():
@@ -392,7 +430,7 @@ def test_retry_failed_gitlab_comment_posts_again():
 
     try:
         with patch("src.tools.gitlab_client.post_mr_comment") as post_comment:
-            res = client.post("/api/reviews/thread-comment-retry/comments/retry")
+            res = client.post("/api/reviews/thread-comment-retry/comments/retry", headers={"X-Operator": "alice"})
     finally:
         clear_override_db()
 
@@ -405,4 +443,7 @@ def test_retry_failed_gitlab_comment_posts_again():
     assert len(records) == 2
     assert records[-1].source == "retry"
     assert records[-1].success is True
+    audit_log = db.query(AuditLog).filter_by(resource_id="thread-comment-retry").one()
+    assert audit_log.actor == "alice"
+    assert audit_log.action == "gitlab_comment.retry"
     db.close()

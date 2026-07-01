@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.models.agent_review import AgentReview
 from src.models.approval_record import ApprovalRecord
+from src.models.audit_log import AuditLog
 from src.models.gitlab_comment_record import GitLabCommentRecord
 from src.models.review_task import ReviewTask
 
@@ -219,6 +220,48 @@ def get_latest_failed_gitlab_comment_record(db: Session, thread_id: str) -> GitL
     )
 
 
+def record_audit_log(
+    db: Session,
+    *,
+    actor: str | None,
+    action: str,
+    resource_type: str,
+    resource_id: str,
+    detail: dict[str, Any] | None = None,
+) -> AuditLog:
+    log = AuditLog(
+        actor=actor or "anonymous",
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        detail=detail,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def list_audit_logs(
+    db: Session,
+    *,
+    resource_id: str | None = None,
+    action: str | None = None,
+    actor: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    query = select(AuditLog)
+    if resource_id:
+        query = query.where(AuditLog.resource_id == resource_id)
+    if action:
+        query = query.where(AuditLog.action == action)
+    if actor:
+        query = query.where(AuditLog.actor == actor)
+
+    logs = db.scalars(query.order_by(AuditLog.created_at.desc()).limit(limit)).all()
+    return [serialize_audit_log(log) for log in logs]
+
+
 def list_pending_reviews(db: Session) -> dict[str, dict[str, Any]]:
     tasks = db.scalars(
         select(ReviewTask)
@@ -261,6 +304,7 @@ def get_review_detail(db: Session, thread_id: str) -> dict[str, Any] | None:
     detail["gitlab_comment_records"] = [
         serialize_gitlab_comment_record(record) for record in task.gitlab_comment_records
     ]
+    detail["audit_logs"] = list_audit_logs(db, resource_id=thread_id, limit=50)
     return detail
 
 
@@ -332,6 +376,17 @@ def serialize_gitlab_comment_record(record: GitLabCommentRecord) -> dict[str, An
         "success": record.success,
         "error_message": record.error_message,
         "posted_at": record.posted_at.isoformat() if record.posted_at else None,
+    }
+
+
+def serialize_audit_log(log: AuditLog) -> dict[str, Any]:
+    return {
+        "actor": log.actor,
+        "action": log.action,
+        "resource_type": log.resource_type,
+        "resource_id": log.resource_id,
+        "detail": log.detail,
+        "created_at": log.created_at.isoformat() if log.created_at else None,
     }
 
 

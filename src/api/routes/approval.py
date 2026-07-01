@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from src.core.workflow import graph
@@ -10,8 +10,10 @@ from src.services.review_task_service import (
     get_review_detail,
     get_latest_failed_gitlab_comment_record,
     get_review_task_by_thread_id,
+    list_audit_logs,
     list_pending_reviews,
     list_review_history,
+    record_audit_log,
     record_gitlab_comment_result,
     record_approval_decision,
     update_task_from_graph_state,
@@ -25,7 +27,11 @@ class ResumeRequest(BaseModel):
     modified_comment: Optional[str] = None
 
 @router.post("/resume")
-async def resume_workflow(req: ResumeRequest, db: Session = Depends(get_db)):
+async def resume_workflow(
+    req: ResumeRequest,
+    db: Session = Depends(get_db),
+    operator: str | None = Header(default=None, alias="X-Operator"),
+):
     thread_id = req.thread_id
     decision = req.decision
 
@@ -111,6 +117,15 @@ async def resume_workflow(req: ResumeRequest, db: Session = Depends(get_db)):
             original_comment=original_comment,
             modified_comment=req.modified_comment.strip() if req.modified_comment else None,
             comment_posted=comment_posted,
+            operator=operator,
+        )
+        record_audit_log(
+            db,
+            actor=operator,
+            action=f"review.{decision}",
+            resource_type="review_task",
+            resource_id=thread_id,
+            detail={"comment_posted": comment_posted, "status": "rejected" if decision == "reject" else "completed"},
         )
         
     return {
@@ -146,7 +161,11 @@ async def get_review_task_detail(thread_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/reviews/{thread_id}/comments/retry")
-async def retry_gitlab_comment(thread_id: str, db: Session = Depends(get_db)):
+async def retry_gitlab_comment(
+    thread_id: str,
+    db: Session = Depends(get_db),
+    operator: str | None = Header(default=None, alias="X-Operator"),
+):
     failed_record = get_latest_failed_gitlab_comment_record(db, thread_id)
     if failed_record is None:
         raise HTTPException(status_code=404, detail="failed GitLab comment record not found")
@@ -164,6 +183,14 @@ async def retry_gitlab_comment(thread_id: str, db: Session = Depends(get_db)):
             source="retry",
             success=True,
         )
+        record_audit_log(
+            db,
+            actor=operator,
+            action="gitlab_comment.retry",
+            resource_type="review_task",
+            resource_id=thread_id,
+            detail={"success": True, "project_id": failed_record.project_id, "mr_iid": failed_record.mr_iid},
+        )
     except Exception as exc:
         record_gitlab_comment_result(
             db,
@@ -175,6 +202,25 @@ async def retry_gitlab_comment(thread_id: str, db: Session = Depends(get_db)):
             success=False,
             error_message=str(exc),
         )
+        record_audit_log(
+            db,
+            actor=operator,
+            action="gitlab_comment.retry",
+            resource_type="review_task",
+            resource_id=thread_id,
+            detail={"success": False, "error_message": str(exc)},
+        )
         raise HTTPException(status_code=502, detail=f"failed to post GitLab comment: {exc}")
 
     return {"status": "comment_posted", "thread_id": thread_id}
+
+
+@router.get("/audit-logs")
+async def get_audit_logs(
+    resource_id: str | None = None,
+    action: str | None = None,
+    actor: str | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    return list_audit_logs(db, resource_id=resource_id, action=action, actor=actor, limit=limit)

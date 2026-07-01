@@ -246,13 +246,22 @@ curl http://127.0.0.1:8000/api/reviews/<thread_id>
 
 失败任务重新入队：
 ```bash
-curl -X POST http://127.0.0.1:8000/api/reviews/<thread_id>/retry
+curl -X POST http://127.0.0.1:8000/api/reviews/<thread_id>/retry \
+  -H "X-Operator: alice"
 ```
 
 失败 GitLab 评论单独重试：
 ```bash
-curl -X POST http://127.0.0.1:8000/api/reviews/<thread_id>/comments/retry
+curl -X POST http://127.0.0.1:8000/api/reviews/<thread_id>/comments/retry \
+  -H "X-Operator: alice"
 ```
+
+查询审计日志：
+```bash
+curl "http://127.0.0.1:8000/api/audit-logs?resource_id=<thread_id>&limit=20"
+```
+
+人工审批、任务重试、评论重试会读取请求头 `X-Operator` 作为操作者；未传时记录为 `anonymous`。
 
 任务状态会记录 `queued_at`、`started_at`、`failed_at`、`completed_at`、`retry_count`、`job_id` 与 `error_message`，用于排查 Worker 失败和重试链路。
 

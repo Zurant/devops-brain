@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DevOps Brain - Approval Dashboard</title>
+    <title>DevOps Brain - 审批工作台</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f5f7; margin: 0; padding: 20px; }
         .container { max-width: 1040px; margin: 0 auto; }
@@ -36,48 +36,52 @@
 </head>
 <body>
     <div class="container">
-        <h1>Pending Reviews</h1>
-        <div id="pending-list">Loading...</div>
-        <h1>Review History</h1>
+        <h1>待审批审查</h1>
+        <div id="pending-list">加载中...</div>
+        <h1>审查历史</h1>
         <div class="card">
             <div class="filters">
                 <div class="field">
-                    <label for="filter-status">Status</label>
+                    <label for="filter-status">状态</label>
                     <select id="filter-status">
-                        <option value="">All</option>
-                        <option value="queued">Queued</option>
-                        <option value="running">Running</option>
-                        <option value="waiting_human">Waiting Human</option>
-                        <option value="completed">Completed</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="failed">Failed</option>
+                        <option value="">全部</option>
+                        <option value="queued">已排队</option>
+                        <option value="running">运行中</option>
+                        <option value="waiting_human">待人工审批</option>
+                        <option value="completed">已完成</option>
+                        <option value="rejected">已拒绝</option>
+                        <option value="failed">失败</option>
                     </select>
                 </div>
                 <div class="field">
-                    <label for="filter-risk">Risk</label>
+                    <label for="filter-risk">风险</label>
                     <select id="filter-risk">
-                        <option value="">All</option>
+                        <option value="">全部</option>
                         <option value="HIGH">HIGH</option>
                         <option value="MEDIUM">MEDIUM</option>
                         <option value="LOW">LOW</option>
                     </select>
                 </div>
                 <div class="field">
-                    <label for="filter-project">Project ID</label>
+                    <label for="filter-project">项目 ID</label>
                     <input id="filter-project" placeholder="1234">
                 </div>
                 <div class="field">
-                    <label for="filter-limit">Limit</label>
+                    <label for="filter-limit">数量</label>
                     <input id="filter-limit" type="number" min="1" max="200" value="50">
                 </div>
-                <button class="btn-refresh" onclick="fetchHistory()">Refresh</button>
+                <div class="field">
+                    <label for="operator-name">操作人</label>
+                    <input id="operator-name" placeholder="alice">
+                </div>
+                <button class="btn-refresh" onclick="fetchHistory()">刷新</button>
             </div>
             <div class="actions">
-                <button class="btn-reject" onclick="showHighRiskReviews()">HIGH Risk</button>
-                <button class="btn-detail" onclick="clearHistoryFilters()">Clear</button>
+                <button class="btn-reject" onclick="showHighRiskReviews()">高风险</button>
+                <button class="btn-detail" onclick="clearHistoryFilters()">清空筛选</button>
             </div>
         </div>
-        <div id="history-list">Loading...</div>
+        <div id="history-list">加载中...</div>
     </div>
 
     <script>
@@ -90,13 +94,18 @@
                 .replaceAll("'", '&#039;');
         }
 
+        function operatorHeaders() {
+            const operator = document.getElementById('operator-name')?.value.trim();
+            return operator ? { 'X-Operator': operator } : {};
+        }
+
         async function fetchPending() {
             try {
                 const res = await fetch('/api/pending');
                 const data = await res.json();
                 renderList(data);
             } catch (err) {
-                document.getElementById('pending-list').innerText = "Failed to load.";
+                document.getElementById('pending-list').innerText = "加载失败。";
             }
         }
 
@@ -115,7 +124,7 @@
                 const data = await res.json();
                 renderHistory(data);
             } catch (err) {
-                document.getElementById('history-list').innerText = "Failed to load.";
+                document.getElementById('history-list').innerText = "加载失败。";
             }
         }
 
@@ -125,7 +134,7 @@
             const keys = Object.keys(pendingReviews);
             
             if (keys.length === 0) {
-                list.innerHTML = '<p>No pending reviews found.</p>';
+                list.innerHTML = '<p>暂无待审批审查。</p>';
                 return;
             }
 
@@ -135,22 +144,22 @@
                 card.className = 'card';
                 card.innerHTML = `
                     <div class="header">
-                        <h2>MR !${escapeHtml(review.mr_id)} <a href="${escapeHtml(review.mr_url)}" target="_blank" style="font-size: 14px; font-weight: normal;">[View in GitLab]</a></h2>
-                        <span class="risk-${escapeHtml(review.final_risk_level)}">Risk: ${escapeHtml(review.final_risk_level)}</span>
+                        <h2>MR !${escapeHtml(review.mr_id)} <a href="${escapeHtml(review.mr_url)}" target="_blank" style="font-size: 14px; font-weight: normal;">[在 GitLab 查看]</a></h2>
+                        <span class="risk-${escapeHtml(review.final_risk_level)}">风险：${escapeHtml(review.final_risk_level)}</span>
                     </div>
                     <div>
-                        <strong>Summary Report:</strong>
+                        <strong>汇总报告：</strong>
                         <pre>${escapeHtml(review.summary_report)}</pre>
                     </div>
                     <div>
-                        <strong>GitLab Comment:</strong>
+                        <strong>GitLab 评论：</strong>
                         <textarea id="comment-${thread_id}">${escapeHtml(review.final_comment)}</textarea>
                     </div>
                     <div class="actions">
-                        <button class="btn-approve" onclick="submitDecision('${thread_id}', 'approve')">Approve (Resume)</button>
-                        <button class="btn-modify" onclick="submitDecision('${thread_id}', 'modify')">Modify & Submit</button>
-                        <button class="btn-reject" onclick="submitDecision('${thread_id}', 'reject')">Reject</button>
-                        <button class="btn-detail" onclick="loadReviewDetail('${thread_id}')">Details</button>
+                        <button class="btn-approve" onclick="submitDecision('${thread_id}', 'approve')">通过并继续</button>
+                        <button class="btn-modify" onclick="submitDecision('${thread_id}', 'modify')">修改后提交</button>
+                        <button class="btn-reject" onclick="submitDecision('${thread_id}', 'reject')">拒绝</button>
+                        <button class="btn-detail" onclick="loadReviewDetail('${thread_id}')">详情</button>
                     </div>
                     <div id="detail-${thread_id}" class="detail" style="display:none;"></div>
                 `;
@@ -163,7 +172,7 @@
             list.innerHTML = '';
 
             if (!items || items.length === 0) {
-                list.innerHTML = '<p>No review history found.</p>';
+                list.innerHTML = '<p>暂无审查历史。</p>';
                 return;
             }
 
@@ -171,23 +180,23 @@
                 const card = document.createElement('div');
                 card.className = 'card';
                 const retryAction = review.status === 'failed'
-                    ? `<div class="actions"><button class="btn-retry" onclick="retryReview('${escapeHtml(review.thread_id)}')">Retry</button></div>`
+                    ? `<div class="actions"><button class="btn-retry" onclick="retryReview('${escapeHtml(review.thread_id)}')">重试</button></div>`
                     : '';
                 const errorBlock = review.error_message
                     ? `<div class="error">${escapeHtml(review.error_message)}</div>`
                     : '';
                 card.innerHTML = `
                     <div class="header">
-                        <h2>MR !${escapeHtml(review.mr_id)} <a href="${escapeHtml(review.mr_url)}" target="_blank" style="font-size: 14px; font-weight: normal;">[View in GitLab]</a></h2>
+                        <h2>MR !${escapeHtml(review.mr_id)} <a href="${escapeHtml(review.mr_url)}" target="_blank" style="font-size: 14px; font-weight: normal;">[在 GitLab 查看]</a></h2>
                         <span class="status">${escapeHtml(review.status)}</span>
                     </div>
-                    <p class="meta">Thread: ${escapeHtml(review.thread_id)} · Job: ${escapeHtml(review.job_id || '-')} · Retry: ${escapeHtml(review.retry_count)} · Risk: ${escapeHtml(review.final_risk_level || '-')} · Decision: ${escapeHtml(review.approval_decision || '-')} · Posted: ${escapeHtml(review.comment_posted)}</p>
-                    <p class="meta">Queued: ${escapeHtml(review.queued_at || '-')} · Started: ${escapeHtml(review.started_at || '-')} · Failed: ${escapeHtml(review.failed_at || '-')} · Completed: ${escapeHtml(review.completed_at || '-')}</p>
+                    <p class="meta">线程：${escapeHtml(review.thread_id)} · 任务：${escapeHtml(review.job_id || '-')} · 重试次数：${escapeHtml(review.retry_count)} · 风险：${escapeHtml(review.final_risk_level || '-')} · 审批：${escapeHtml(review.approval_decision || '-')} · 已回写：${escapeHtml(review.comment_posted)}</p>
+                    <p class="meta">排队：${escapeHtml(review.queued_at || '-')} · 开始：${escapeHtml(review.started_at || '-')} · 失败：${escapeHtml(review.failed_at || '-')} · 完成：${escapeHtml(review.completed_at || '-')}</p>
                     ${errorBlock}
                     <pre>${escapeHtml(review.final_comment)}</pre>
                     <div class="actions">
-                        <button class="btn-detail" onclick="loadReviewDetail('${escapeHtml(review.thread_id)}')">Details</button>
-                        ${review.status === 'failed' ? `<button class="btn-retry" onclick="retryReview('${escapeHtml(review.thread_id)}')">Retry</button>` : ''}
+                        <button class="btn-detail" onclick="loadReviewDetail('${escapeHtml(review.thread_id)}')">详情</button>
+                        ${review.status === 'failed' ? `<button class="btn-retry" onclick="retryReview('${escapeHtml(review.thread_id)}')">重试</button>` : ''}
                     </div>
                     <div id="detail-${escapeHtml(review.thread_id)}" class="detail" style="display:none;"></div>
                 `;
@@ -201,43 +210,52 @@
                 <div class="record">
                     <p class="meta">${escapeHtml(item.path)} · +${escapeHtml(item.additions)} · -${escapeHtml(item.deletions)}</p>
                 </div>
-            `).join('') || '<p class="meta">No diff files.</p>';
+            `).join('') || '<p class="meta">暂无变更文件。</p>';
 
             const agentReviews = (detail.agent_reviews || []).map(item => `
                 <div class="record">
-                    <p class="meta">Agent: ${escapeHtml(item.agent_name)} · Risk: ${escapeHtml(item.risk || '-')} · Model: ${escapeHtml(item.model_name || '-')}</p>
+                    <p class="meta">Agent：${escapeHtml(item.agent_name)} · 风险：${escapeHtml(item.risk || '-')} · 模型：${escapeHtml(item.model_name || '-')}</p>
                     ${item.error_message ? `<div class="error">${escapeHtml(item.error_message)}</div>` : ''}
                     <pre>${escapeHtml(JSON.stringify(item.issues || [], null, 2))}</pre>
                 </div>
-            `).join('') || '<p class="meta">No agent reviews.</p>';
+            `).join('') || '<p class="meta">暂无 Agent 审查结果。</p>';
 
             const approvals = (detail.approval_records || []).map(item => `
                 <div class="record">
-                    <p class="meta">Decision: ${escapeHtml(item.decision)} · Posted: ${escapeHtml(item.comment_posted)} · At: ${escapeHtml(item.decided_at || '-')}</p>
+                    <p class="meta">审批：${escapeHtml(item.decision)} · 已回写：${escapeHtml(item.comment_posted)} · 时间：${escapeHtml(item.decided_at || '-')}</p>
                     ${item.modified_comment ? `<pre>${escapeHtml(item.modified_comment)}</pre>` : ''}
                 </div>
-            `).join('') || '<p class="meta">No approval records.</p>';
+            `).join('') || '<p class="meta">暂无审批记录。</p>';
 
             const comments = (detail.gitlab_comment_records || []).map(item => `
                 <div class="record">
-                    <p class="meta">Source: ${escapeHtml(item.source)} · Success: ${escapeHtml(item.success)} · At: ${escapeHtml(item.posted_at || '-')}</p>
+                    <p class="meta">来源：${escapeHtml(item.source)} · 成功：${escapeHtml(item.success)} · 时间：${escapeHtml(item.posted_at || '-')}</p>
                     ${item.error_message ? `<div class="error">${escapeHtml(item.error_message)}</div>` : ''}
                     <pre>${escapeHtml(item.comment_body || '')}</pre>
-                    ${item.success === false ? `<div class="actions"><button class="btn-retry" onclick="retryGitlabComment('${escapeHtml(detail.thread_id)}')">Retry Comment</button></div>` : ''}
+                    ${item.success === false ? `<div class="actions"><button class="btn-retry" onclick="retryGitlabComment('${escapeHtml(detail.thread_id)}')">重试评论回写</button></div>` : ''}
                 </div>
-            `).join('') || '<p class="meta">No GitLab comment records.</p>';
+            `).join('') || '<p class="meta">暂无 GitLab 回写记录。</p>';
+
+            const auditLogs = (detail.audit_logs || []).map(item => `
+                <div class="record">
+                    <p class="meta">操作人：${escapeHtml(item.actor)} · 动作：${escapeHtml(item.action)} · 时间：${escapeHtml(item.created_at || '-')}</p>
+                    <pre>${escapeHtml(JSON.stringify(item.detail || {}, null, 2))}</pre>
+                </div>
+            `).join('') || '<p class="meta">暂无审计日志。</p>';
 
             return `
-                <h3>Diff Summary</h3>
-                <p class="meta">Files: ${escapeHtml(diffSummary.file_count || 0)} · Additions: ${escapeHtml(diffSummary.additions || 0)} · Deletions: ${escapeHtml(diffSummary.deletions || 0)}</p>
+                <h3>变更摘要</h3>
+                <p class="meta">文件：${escapeHtml(diffSummary.file_count || 0)} · 新增：${escapeHtml(diffSummary.additions || 0)} · 删除：${escapeHtml(diffSummary.deletions || 0)}</p>
                 ${diffFiles}
                 ${diffSummary.preview ? `<pre>${escapeHtml(diffSummary.preview)}</pre>` : ''}
-                <h3>Agent Reviews</h3>
+                <h3>Agent 审查结果</h3>
                 ${agentReviews}
-                <h3>Approval Records</h3>
+                <h3>审批记录</h3>
                 ${approvals}
-                <h3>GitLab Comments</h3>
+                <h3>GitLab 回写记录</h3>
                 ${comments}
+                <h3>审计日志</h3>
+                ${auditLogs}
             `;
         }
 
@@ -249,35 +267,35 @@
                 return;
             }
             detailBox.style.display = 'block';
-            detailBox.innerHTML = '<p class="meta">Loading details...</p>';
+            detailBox.innerHTML = '<p class="meta">正在加载详情...</p>';
             try {
                 const res = await fetch(`/api/reviews/${thread_id}`);
                 if (!res.ok) {
                     const error = await res.json();
-                    detailBox.innerHTML = `<div class="error">${escapeHtml(error.detail || 'Failed to load detail.')}</div>`;
+                    detailBox.innerHTML = `<div class="error">${escapeHtml(error.detail || '加载详情失败。')}</div>`;
                     return;
                 }
                 const detail = await res.json();
                 detailBox.innerHTML = renderReviewDetail(detail);
             } catch (err) {
-                detailBox.innerHTML = '<div class="error">Error loading detail.</div>';
+                detailBox.innerHTML = '<div class="error">加载详情异常。</div>';
             }
         }
 
         async function retryReview(thread_id) {
             try {
-                const res = await fetch(`/api/reviews/${thread_id}/retry`, { method: 'POST' });
+                const res = await fetch(`/api/reviews/${thread_id}/retry`, { method: 'POST', headers: operatorHeaders() });
                 if (res.ok) {
                     const result = await res.json();
-                    alert(`Retry queued: ${result.job_id}`);
+                    alert(`已重新入队：${result.job_id}`);
                     fetchPending();
                     fetchHistory();
                 } else {
                     const error = await res.json();
-                    alert(error.detail || 'Failed to retry review.');
+                    alert(error.detail || '重试审查失败。');
                 }
             } catch (err) {
-                alert('Error retrying review.');
+                alert('重试审查异常。');
             }
         }
 
@@ -297,19 +315,19 @@
 
         async function retryGitlabComment(thread_id) {
             try {
-                const res = await fetch(`/api/reviews/${thread_id}/comments/retry`, { method: 'POST' });
+                const res = await fetch(`/api/reviews/${thread_id}/comments/retry`, { method: 'POST', headers: operatorHeaders() });
                 if (res.ok) {
-                    alert('GitLab comment posted.');
+                    alert('GitLab 评论已回写。');
                     fetchHistory();
                     const detailBox = document.getElementById(`detail-${thread_id}`);
                     if (detailBox) detailBox.innerHTML = '';
                     loadReviewDetail(thread_id);
                 } else {
                     const error = await res.json();
-                    alert(error.detail || 'Failed to retry GitLab comment.');
+                    alert(error.detail || '重试 GitLab 评论失败。');
                 }
             } catch (err) {
-                alert('Error retrying GitLab comment.');
+                alert('重试 GitLab 评论异常。');
             }
         }
 
@@ -321,20 +339,20 @@
                 }
                 const res = await fetch('/api/resume', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...operatorHeaders() },
                     body: JSON.stringify(body)
                 });
                 if (res.ok) {
                     const result = await res.json();
-                    alert(`Decision submitted: ${result.decision}. Comment posted: ${result.comment_posted}`);
+                    alert(`审批已提交：${result.decision}。评论已回写：${result.comment_posted}`);
                     fetchPending();
                     fetchHistory();
                 } else {
                     const error = await res.json();
-                    alert(error.detail || 'Failed to submit decision.');
+                    alert(error.detail || '提交审批失败。');
                 }
             } catch (err) {
-                alert('Error submitting decision.');
+                alert('提交审批异常。');
             }
         }
 

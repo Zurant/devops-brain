@@ -2,7 +2,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
 from src.db.base import Base
-from src.models import AgentReview, ApprovalRecord, GitLabCommentRecord, ReviewTask
+from src.models import AgentReview, ApprovalRecord, AuditLog, GitLabCommentRecord, ReviewTask
 
 
 def test_enterprise_core_tables_are_registered():
@@ -11,6 +11,7 @@ def test_enterprise_core_tables_are_registered():
     assert "review_tasks" in tables
     assert "agent_reviews" in tables
     assert "approval_records" in tables
+    assert "audit_logs" in tables
     assert "gitlab_comment_records" in tables
 
 
@@ -42,6 +43,6 @@ def test_agent_review_and_approval_foreign_keys():
 def test_models_compile_for_postgresql():
     dialect = postgresql.dialect()
 
-    for table in [ReviewTask.__table__, AgentReview.__table__, ApprovalRecord.__table__, GitLabCommentRecord.__table__]:
+    for table in [ReviewTask.__table__, AgentReview.__table__, ApprovalRecord.__table__, AuditLog.__table__, GitLabCommentRecord.__table__]:
         sql = str(CreateTable(table).compile(dialect=dialect))
         assert f"CREATE TABLE {table.name}" in sql
