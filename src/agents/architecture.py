@@ -12,7 +12,13 @@ PROMPT_TEMPLATE = """
 {
     "agent": "architecture",
     "issues": [
-        {"description": "发现的架构合规问题"}
+        {
+            "title": "问题短标题",
+            "type": "layer_violation|coupling|solid_violation|dependency_direction|other",
+            "description": "架构问题原因和长期影响",
+            "suggestion": "可执行的架构调整建议",
+            "risk": "LOW|MEDIUM|HIGH"
+        }
     ],
     "risk": "LOW" // 必须是 LOW, MEDIUM, HIGH 之一
 }

@@ -364,6 +364,7 @@ Done When：
 - `POST /api/reviews/{thread_id}/knowledge` 支持从审查任务的 Agent 问题沉淀经验
 - 审批工作台历史任务卡片已提供“沉淀经验”入口，详情页可查看关联历史经验
 - 新增基础关键词召回，专家 Agent 会将命中的历史经验注入 Prompt
+- 专家 Agent issue 输出已结构化为 `title/type/description/suggestion/risk`，沉淀经验时会自动保留标题和修复建议；旧格式仅有 `description` 时会生成标题兜底
 
 剩余增强：
 - 引入 pgvector 并生成 embedding

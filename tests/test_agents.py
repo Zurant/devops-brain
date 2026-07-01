@@ -87,3 +87,14 @@ def test_security_agent_injects_knowledge_context(mock_llm, mock_knowledge):
     assert "历史经验参考" in prompt
     assert "SQL 注入风险" in prompt
     assert "使用参数化查询" in prompt
+
+
+@patch("src.agents.quality.retrieve_relevant_knowledge", return_value=[])
+@patch("src.agents.quality.call_llm", side_effect=mock_call_llm_success)
+def test_quality_agent_prompt_requires_structured_issue_schema(mock_llm, mock_knowledge):
+    quality_agent({"diff_content": "def foo(): pass"})
+
+    prompt = mock_llm.call_args.args[0]
+    assert '"title": "问题短标题"' in prompt
+    assert '"type": "complexity|duplication|naming|maintainability|other"' in prompt
+    assert '"suggestion": "可执行的修改建议"' in prompt

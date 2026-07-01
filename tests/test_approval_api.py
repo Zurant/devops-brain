@@ -477,6 +477,35 @@ def test_review_issues_can_be_promoted_to_knowledge():
     db.close()
 
 
+def test_review_knowledge_title_falls_back_to_description():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    task = ReviewTask(thread_id="thread-description-only", project_id="1234", mr_iid="42", status="completed")
+    db.add(task)
+    db.commit()
+    db.add(
+        AgentReview(
+            task_id=task.id,
+            agent_name="quality",
+            risk="MEDIUM",
+            issues=[{"description": "这个函数承担了过多职责，后续维护成本较高，建议拆分。"}],
+        )
+    )
+    db.commit()
+    db.close()
+
+    try:
+        res = client.post("/api/reviews/thread-description-only/knowledge")
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    item = res.json()["items"][0]
+    assert item["title"] == "这个函数承担了过多职责，后续维护成本较高，建议拆分。"
+    assert item["description"] == "这个函数承担了过多职责，后续维护成本较高，建议拆分。"
+
+
 def test_resume_records_failed_gitlab_comment():
     session_factory = build_test_session()
     override_db(session_factory)

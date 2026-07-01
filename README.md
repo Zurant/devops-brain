@@ -284,6 +284,8 @@ curl "http://127.0.0.1:8000/api/knowledge?risk=HIGH&limit=20"
 
 后续审查时，Quality / Security / Architecture Agent 会基于当前 diff 关键词召回少量相关历史经验，并注入到各自 Prompt 的“历史经验参考”段落中；数据库不可用或没有命中经验时，审查流程会继续正常执行。
 
+专家 Agent 的单条 issue 已要求输出结构化字段：`title`、`type`、`description`、`suggestion`、`risk`。从历史审查沉淀经验时，会优先使用这些字段填充 `review_knowledge`；如果旧结果只有 `description`，系统会用描述前缀自动生成标题。
+
 人工审批、任务重试、评论重试、经验沉淀会读取请求头 `X-Operator` 作为操作者；未传时记录为 `anonymous`。
 
 任务状态会记录 `queued_at`、`started_at`、`failed_at`、`completed_at`、`retry_count`、`job_id` 与 `error_message`，用于排查 Worker 失败和重试链路。

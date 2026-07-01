@@ -342,6 +342,8 @@ def create_knowledge_from_review_task(
 
             if not description and not title:
                 continue
+            if not title and description:
+                title = build_title_from_description(description)
 
             created.append(
                 ReviewKnowledge(
@@ -374,6 +376,13 @@ def _pick_issue_text(issue: dict[str, Any], *keys: str) -> str | None:
         if value is not None and str(value).strip():
             return str(value).strip()
     return None
+
+
+def build_title_from_description(description: str, *, max_length: int = 60) -> str:
+    normalized = " ".join(description.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[:max_length].rstrip() + "..."
 
 
 def list_pending_reviews(db: Session) -> dict[str, dict[str, Any]]:

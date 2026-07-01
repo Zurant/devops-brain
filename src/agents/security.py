@@ -12,7 +12,13 @@ PROMPT_TEMPLATE = """
 {
     "agent": "security",
     "issues": [
-        {"description": "发现的安全漏洞"}
+        {
+            "title": "问题短标题",
+            "type": "sql_injection|xss|secret_leak|auth_bypass|insecure_dependency|other",
+            "description": "漏洞原因、攻击面和影响",
+            "suggestion": "可执行的修复建议",
+            "risk": "LOW|MEDIUM|HIGH"
+        }
     ],
     "risk": "LOW" // 必须是 LOW, MEDIUM, HIGH 之一
 }

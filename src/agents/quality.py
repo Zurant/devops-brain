@@ -12,7 +12,13 @@ PROMPT_TEMPLATE = """
 {
     "agent": "quality",
     "issues": [
-        {"description": "发现的代码质量问题"}
+        {
+            "title": "问题短标题",
+            "type": "complexity|duplication|naming|maintainability|other",
+            "description": "问题原因和影响",
+            "suggestion": "可执行的修改建议",
+            "risk": "LOW|MEDIUM|HIGH"
+        }
     ],
     "risk": "LOW" // 必须是 LOW, MEDIUM, HIGH 之一
 }
