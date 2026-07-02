@@ -9,7 +9,10 @@ from src.models.agent_review import AgentReview
 from src.models.approval_record import ApprovalRecord
 from src.models.audit_log import AuditLog
 from src.models.gitlab_comment_record import GitLabCommentRecord
+from src.models.review_diff_file import ReviewDiffFile
 from src.models.review_knowledge import ReviewKnowledge
+from src.models.review_package import ReviewPackage
+from src.models.review_plan import ReviewPlan
 from src.models.review_task import ReviewTask
 
 
@@ -400,6 +403,16 @@ def create_knowledge_from_review_task(
         return None
 
     created: list[ReviewKnowledge] = []
+    existing_entries = db.scalars(select(ReviewKnowledge).where(ReviewKnowledge.source_task_id == task.id)).all()
+    existing_keys = {
+        (
+            item.source_agent or "",
+            item.issue_type or "",
+            item.title or "",
+            item.description or "",
+        )
+        for item in existing_entries
+    }
     for review in task.agent_reviews:
         for issue in iter_review_issues(review.issues):
             if not isinstance(issue, dict):
@@ -426,6 +439,11 @@ def create_knowledge_from_review_task(
                 title = build_title_from_description(description)
             if not suggestion and description:
                 suggestion = build_suggestion_from_description(description)
+
+            knowledge_key = (review.agent_name or "", issue_type[:128], title or "", description or title or "未提供问题描述")
+            if knowledge_key in existing_keys:
+                continue
+            existing_keys.add(knowledge_key)
 
             created.append(
                 ReviewKnowledge(
@@ -529,6 +547,50 @@ def list_review_history(
     return [serialize_review_task(task) for task in tasks]
 
 
+def get_dashboard_metrics(db: Session) -> dict[str, Any]:
+    tasks = db.scalars(select(ReviewTask)).all()
+    comment_records = db.scalars(select(GitLabCommentRecord)).all()
+    knowledge_entries = db.scalars(select(ReviewKnowledge)).all()
+
+    status_counts = count_values(task.status for task in tasks)
+    risk_counts = count_values((task.final_risk_level or "UNKNOWN") for task in tasks)
+    project_counts = count_values(task.project_id for task in tasks)
+
+    latest_tasks = sorted(tasks, key=lambda item: item.created_at or datetime.min, reverse=True)[:10]
+    failed_comments = [record for record in comment_records if record.success is False]
+    successful_comments = [record for record in comment_records if record.success is True]
+    completed_tasks = [task for task in tasks if task.status in {"completed", "rejected"}]
+    waiting_tasks = [task for task in tasks if task.status == "waiting_human"]
+    failed_tasks = [task for task in tasks if task.status == "failed"]
+
+    return {
+        "totals": {
+            "tasks": len(tasks),
+            "waiting_human": len(waiting_tasks),
+            "failed": len(failed_tasks),
+            "completed": len(completed_tasks),
+            "high_risk": risk_counts.get("HIGH", 0),
+            "gitlab_comment_success": len(successful_comments),
+            "gitlab_comment_failed": len(failed_comments),
+            "knowledge_entries": len(knowledge_entries),
+            "active_knowledge_entries": len([item for item in knowledge_entries if item.is_active]),
+        },
+        "status_counts": status_counts,
+        "risk_counts": risk_counts,
+        "project_counts": project_counts,
+        "latest_tasks": [serialize_review_task(task) for task in latest_tasks],
+        "failed_gitlab_comments": [serialize_gitlab_comment_record(record) for record in failed_comments[-10:]],
+    }
+
+
+def count_values(values: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(value or "UNKNOWN")
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: item[0]))
+
+
 def get_review_detail(db: Session, thread_id: str) -> dict[str, Any] | None:
     task = get_review_task_by_thread_id(db, thread_id)
     if task is None:
@@ -537,6 +599,11 @@ def get_review_detail(db: Session, thread_id: str) -> dict[str, Any] | None:
     detail = serialize_review_task(task)
     diff_content = (task.initial_state or {}).get("diff_content") if task.initial_state else None
     detail["diff_summary"] = summarize_diff_content(diff_content)
+    detail["diff_files"] = [serialize_review_diff_file(item) for item in sorted(task.diff_files, key=lambda item: item.id)]
+    detail["review_plans"] = [serialize_review_plan(plan) for plan in sorted(task.review_plans, key=lambda item: item.id)]
+    detail["review_packages"] = [
+        serialize_review_package(package) for package in sorted(task.review_packages, key=lambda item: (item.priority, item.id))
+    ]
     detail["agent_reviews"] = [serialize_agent_review(review) for review in task.agent_reviews]
     detail["approval_records"] = [serialize_approval_record(record) for record in task.approval_records]
     detail["gitlab_comment_records"] = [
@@ -581,6 +648,66 @@ def summarize_diff_content(diff_content: str | None) -> dict[str, Any]:
     }
 
 
+def serialize_review_diff_file(item: ReviewDiffFile) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "file_path": item.file_path,
+        "old_path": item.old_path,
+        "new_path": item.new_path,
+        "change_type": item.change_type,
+        "language": item.language,
+        "extension": item.extension,
+        "directory": item.directory,
+        "additions": item.additions,
+        "deletions": item.deletions,
+        "total_changes": item.total_changes,
+        "risk_domains": item.risk_domains,
+        "is_large_file": item.is_large_file,
+        "analysis_metadata": item.analysis_metadata,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
+
+def serialize_review_plan(plan: ReviewPlan) -> dict[str, Any]:
+    return {
+        "id": plan.id,
+        "mr_type": plan.mr_type,
+        "review_strategy": plan.review_strategy,
+        "approval_policy": plan.approval_policy,
+        "required_agents": plan.required_agents,
+        "risk_domains": plan.risk_domains,
+        "file_count": plan.file_count,
+        "total_changes": plan.total_changes,
+        "package_count": plan.package_count,
+        "is_large_mr": plan.is_large_mr,
+        "reason": plan.reason,
+        "plan_metadata": plan.plan_metadata,
+        "created_at": plan.created_at.isoformat() if plan.created_at else None,
+    }
+
+
+def serialize_review_package(package: ReviewPackage) -> dict[str, Any]:
+    return {
+        "id": package.id,
+        "plan_id": package.plan_id,
+        "package_key": package.package_key,
+        "package_type": package.package_type,
+        "title": package.title,
+        "directory": package.directory,
+        "language": package.language,
+        "risk_domains": package.risk_domains,
+        "file_paths": package.file_paths,
+        "selected_agents": package.selected_agents,
+        "additions": package.additions,
+        "deletions": package.deletions,
+        "total_changes": package.total_changes,
+        "priority": package.priority,
+        "requires_human": package.requires_human,
+        "package_metadata": package.package_metadata,
+        "created_at": package.created_at.isoformat() if package.created_at else None,
+    }
+
+
 def serialize_agent_review(review: AgentReview) -> dict[str, Any]:
     return {
         "agent_name": review.agent_name,
@@ -612,6 +739,7 @@ def serialize_approval_record(record: ApprovalRecord) -> dict[str, Any]:
 
 def serialize_gitlab_comment_record(record: GitLabCommentRecord) -> dict[str, Any]:
     return {
+        "thread_id": record.thread_id,
         "project_id": record.project_id,
         "mr_iid": record.mr_iid,
         "comment_body": record.comment_body,

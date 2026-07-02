@@ -10,6 +10,7 @@ from src.services.review_task_service import (
     backfill_empty_knowledge_suggestions,
     create_knowledge_from_review_task,
     create_review_knowledge,
+    get_dashboard_metrics,
     get_review_detail,
     get_latest_failed_gitlab_comment_record,
     get_review_task_by_thread_id,
@@ -190,6 +191,11 @@ async def get_review_task_detail(thread_id: str, db: Session = Depends(get_db)):
     if detail is None:
         raise HTTPException(status_code=404, detail="review task not found")
     return detail
+
+
+@router.get("/dashboard")
+async def get_dashboard(db: Session = Depends(get_db)):
+    return get_dashboard_metrics(db)
 
 
 @router.post("/reviews/{thread_id}/comments/retry")

@@ -10,7 +10,17 @@ from src.api.globals import pending_reviews
 from src.api.server import app
 from src.db.base import Base
 from src.db.session import get_db
-from src.models import AgentReview, ApprovalRecord, AuditLog, GitLabCommentRecord, ReviewKnowledge, ReviewTask
+from src.models import (
+    AgentReview,
+    ApprovalRecord,
+    AuditLog,
+    GitLabCommentRecord,
+    ReviewDiffFile,
+    ReviewKnowledge,
+    ReviewPackage,
+    ReviewPlan,
+    ReviewTask,
+)
 
 
 client = TestClient(app)
@@ -298,6 +308,95 @@ def test_history_supports_enterprise_filters():
     assert [item["thread_id"] for item in risk_project_res.json()] == ["thread-high-waiting"]
 
 
+def test_dashboard_returns_operational_metrics():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    waiting = ReviewTask(
+        thread_id="thread-dashboard-waiting",
+        project_id="1234",
+        mr_iid="42",
+        status="waiting_human",
+        final_risk_level="HIGH",
+    )
+    completed = ReviewTask(
+        thread_id="thread-dashboard-completed",
+        project_id="1234",
+        mr_iid="43",
+        status="completed",
+        final_risk_level="LOW",
+    )
+    failed = ReviewTask(
+        thread_id="thread-dashboard-failed",
+        project_id="5678",
+        mr_iid="44",
+        status="failed",
+        final_risk_level="MEDIUM",
+    )
+    db.add_all([waiting, completed, failed])
+    db.commit()
+    db.add_all(
+        [
+            GitLabCommentRecord(
+                task_id=completed.id,
+                thread_id="thread-dashboard-completed",
+                project_id="1234",
+                mr_iid="43",
+                comment_body="已回写",
+                source="auto",
+                success=True,
+            ),
+            GitLabCommentRecord(
+                task_id=failed.id,
+                thread_id="thread-dashboard-failed",
+                project_id="5678",
+                mr_iid="44",
+                comment_body="待重试",
+                source="auto",
+                success=False,
+                error_message="GitLab 不可用",
+            ),
+            ReviewKnowledge(
+                issue_type="sql_injection",
+                risk="HIGH",
+                title="SQL 注入",
+                description="SQL 拼接风险",
+                suggestion="使用参数化查询",
+                is_active=True,
+            ),
+            ReviewKnowledge(
+                issue_type="naming",
+                risk="LOW",
+                title="命名问题",
+                description="变量命名不清晰",
+                is_active=False,
+            ),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    try:
+        res = client.get("/api/dashboard")
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["totals"]["tasks"] == 3
+    assert body["totals"]["waiting_human"] == 1
+    assert body["totals"]["failed"] == 1
+    assert body["totals"]["high_risk"] == 1
+    assert body["totals"]["gitlab_comment_success"] == 1
+    assert body["totals"]["gitlab_comment_failed"] == 1
+    assert body["totals"]["knowledge_entries"] == 2
+    assert body["totals"]["active_knowledge_entries"] == 1
+    assert body["status_counts"]["waiting_human"] == 1
+    assert body["risk_counts"]["HIGH"] == 1
+    assert body["project_counts"]["1234"] == 2
+    assert body["failed_gitlab_comments"][0]["error_message"] == "GitLab 不可用"
+
+
 def test_review_detail_returns_audit_records():
     session_factory = build_test_session()
     override_db(session_factory)
@@ -407,6 +506,97 @@ def test_review_detail_returns_referenced_knowledge_payload():
     issues = res.json()["agent_reviews"][0]["issues"]
     assert issues["items"][0]["title"] == "SQL 注入"
     assert issues["referenced_knowledge"][0]["title"] == "历史 SQL 注入经验"
+
+
+def test_review_detail_returns_review_plan_and_packages():
+    session_factory = build_test_session()
+    override_db(session_factory)
+    db = session_factory()
+    task = ReviewTask(thread_id="thread-plan", project_id="1234", mr_iid="42", status="waiting_human")
+    db.add(task)
+    db.commit()
+
+    diff_file = ReviewDiffFile(
+        task_id=task.id,
+        file_path="src/api.py",
+        old_path="src/api.py",
+        new_path="src/api.py",
+        change_type="modified",
+        language="python",
+        extension=".py",
+        directory="src",
+        additions=2,
+        deletions=1,
+        total_changes=3,
+        risk_domains=["api", "database"],
+        is_large_file=False,
+    )
+    plan = ReviewPlan(
+        task_id=task.id,
+        mr_type="database_change",
+        review_strategy="single_package",
+        approval_policy="force_human",
+        required_agents=["architecture", "quality"],
+        risk_domains=["api", "database"],
+        file_count=1,
+        total_changes=3,
+        package_count=1,
+        is_large_mr=False,
+        reason="数据库变更需要人工审批",
+    )
+    db.add_all([diff_file, plan])
+    db.commit()
+
+    package = ReviewPackage(
+        task_id=task.id,
+        plan_id=plan.id,
+        package_key="risk_domain:database",
+        package_type="risk_domain",
+        title="database 风险域审查包",
+        directory="src",
+        language="python",
+        risk_domains=["api", "database"],
+        file_paths=["src/api.py"],
+        selected_agents=["architecture", "quality"],
+        additions=2,
+        deletions=1,
+        total_changes=3,
+        priority=20,
+        requires_human=True,
+    )
+    db.add(package)
+    db.commit()
+    db.add(
+        AgentReview(
+            task_id=task.id,
+            package_id=package.id,
+            package_key="risk_domain:database",
+            agent_name="architecture",
+            risk="HIGH",
+            file_paths=["src/api.py"],
+            risk_domains=["database"],
+            issues=[{"title": "数据库写入缺少事务", "risk": "HIGH"}],
+        )
+    )
+    db.commit()
+    db.close()
+
+    try:
+        res = client.get("/api/reviews/thread-plan")
+    finally:
+        clear_override_db()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["diff_files"][0]["file_path"] == "src/api.py"
+    assert body["diff_files"][0]["risk_domains"] == ["api", "database"]
+    assert body["review_plans"][0]["mr_type"] == "database_change"
+    assert body["review_plans"][0]["approval_policy"] == "force_human"
+    assert body["review_packages"][0]["package_key"] == "risk_domain:database"
+    assert body["review_packages"][0]["selected_agents"] == ["architecture", "quality"]
+    assert body["review_packages"][0]["requires_human"] is True
+    assert body["agent_reviews"][0]["package_key"] == "risk_domain:database"
+    assert body["agent_reviews"][0]["package_id"] == body["review_packages"][0]["id"]
 
 
 def test_audit_logs_can_be_queried():
@@ -590,6 +780,11 @@ def test_review_issues_can_be_promoted_to_knowledge():
             json={"tags": ["人工确认"]},
             headers={"X-Operator": "bob"},
         )
+        duplicate_res = client.post(
+            "/api/reviews/thread-knowledge/knowledge",
+            json={"tags": ["人工确认"]},
+            headers={"X-Operator": "bob"},
+        )
     finally:
         clear_override_db()
 
@@ -598,13 +793,18 @@ def test_review_issues_can_be_promoted_to_knowledge():
     assert body["created_count"] == 1
     assert body["items"][0]["issue_type"] == "sql_injection"
     assert body["items"][0]["created_by"] == "bob"
+    assert duplicate_res.status_code == 200
+    assert duplicate_res.json()["created_count"] == 0
 
     db = session_factory()
     knowledge = db.query(ReviewKnowledge).filter_by(source_thread_id="thread-knowledge").one()
-    audit_log = db.query(AuditLog).filter_by(resource_id="thread-knowledge").one()
+    audit_logs = db.query(AuditLog).filter_by(resource_id="thread-knowledge").order_by(AuditLog.id).all()
     assert knowledge.source_agent == "security"
     assert knowledge.tags == ["人工确认"]
-    assert audit_log.action == "knowledge.create_from_review"
+    assert len(audit_logs) == 2
+    assert audit_logs[0].action == "knowledge.create_from_review"
+    assert audit_logs[0].detail["created_count"] == 1
+    assert audit_logs[1].detail["created_count"] == 0
     db.close()
 
 

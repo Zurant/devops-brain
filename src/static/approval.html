@@ -31,6 +31,15 @@
         .detail { margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; }
         .detail h3 { margin: 14px 0 8px; font-size: 15px; }
         .record { border: 1px solid #eaecf0; border-radius: 4px; padding: 10px; margin-bottom: 8px; }
+        .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 8px; margin: 10px 0; }
+        .metric { border: 1px solid #eaecf0; border-radius: 4px; padding: 10px; background: #fcfcfd; }
+        .metric strong { display: block; color: #101828; font-size: 18px; margin-top: 2px; }
+        .pill { display: inline-block; padding: 2px 7px; border-radius: 4px; background: #eef4ff; color: #3538cd; font-size: 12px; font-weight: 600; margin: 2px 4px 2px 0; }
+        .pill-success { background: #ecfdf3; color: #027a48; }
+        .pill-warning { background: #fffaeb; color: #b54708; }
+        .pill-danger { background: #fff1f3; color: #c01048; }
+        .detail-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 14px; }
+        .package-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
         pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 13px; }
         textarea { width: 100%; min-height: 140px; box-sizing: border-box; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
         .tabs { display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid #d0d5dd; }
@@ -41,17 +50,23 @@
         .form-grid { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 12px; }
         .form-grid .wide { grid-column: 1 / -1; }
         .knowledge-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr); gap: 16px; align-items: start; }
-        @media (max-width: 860px) { .filters, .form-grid, .knowledge-layout { grid-template-columns: 1fr; } .header { align-items: flex-start; flex-direction: column; gap: 8px; } .actions { flex-wrap: wrap; } }
+        @media (max-width: 860px) { .filters, .form-grid, .knowledge-layout, .summary-grid, .package-grid { grid-template-columns: 1fr; } .header { align-items: flex-start; flex-direction: column; gap: 8px; } .actions { flex-wrap: wrap; } }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>DevOps Brain 审查工作台</h1>
         <div class="tabs">
+            <button id="tab-dashboard" class="tab" onclick="switchPanel('dashboard')">概览</button>
             <button id="tab-approval" class="tab active" onclick="switchPanel('approval')">审批</button>
             <button id="tab-history" class="tab" onclick="switchPanel('history')">历史</button>
             <button id="tab-knowledge" class="tab" onclick="switchPanel('knowledge')">经验库</button>
         </div>
+
+        <section id="panel-dashboard" class="panel">
+            <h2>运营概览</h2>
+            <div id="dashboard-content">加载中...</div>
+        </section>
 
         <section id="panel-approval" class="panel active">
             <h2>待审批审查</h2>
@@ -213,13 +228,98 @@
         }
 
         function switchPanel(name) {
-            ['approval', 'history', 'knowledge'].forEach(item => {
+            ['dashboard', 'approval', 'history', 'knowledge'].forEach(item => {
                 document.getElementById(`panel-${item}`).classList.toggle('active', item === name);
                 document.getElementById(`tab-${item}`).classList.toggle('active', item === name);
             });
+            if (name === 'dashboard') fetchDashboard();
             if (name === 'approval') fetchPending();
             if (name === 'history') fetchHistory();
             if (name === 'knowledge') fetchKnowledge();
+        }
+
+        async function fetchDashboard() {
+            const box = document.getElementById('dashboard-content');
+            box.innerHTML = '<div class="card"><p class="meta">正在加载运营指标...</p></div>';
+            try {
+                const res = await fetch('/api/dashboard');
+                if (!res.ok) {
+                    const error = await res.json();
+                    box.innerHTML = `<div class="card"><div class="error">${escapeHtml(error.detail || '加载运营概览失败。')}</div></div>`;
+                    return;
+                }
+                const data = await res.json();
+                renderDashboard(data);
+            } catch (err) {
+                box.innerHTML = '<div class="card"><div class="error">加载运营概览异常。</div></div>';
+            }
+        }
+
+        function renderDashboard(data) {
+            const totals = data.totals || {};
+            const latestTasks = data.latest_tasks || [];
+            const failedComments = data.failed_gitlab_comments || [];
+            document.getElementById('dashboard-content').innerHTML = `
+                <div class="card">
+                    <div class="summary-grid">
+                        <div class="metric"><span class="meta">总任务</span><strong>${escapeHtml(totals.tasks || 0)}</strong></div>
+                        <div class="metric"><span class="meta">待审批</span><strong>${escapeHtml(totals.waiting_human || 0)}</strong></div>
+                        <div class="metric"><span class="meta">高风险</span><strong class="risk-HIGH">${escapeHtml(totals.high_risk || 0)}</strong></div>
+                        <div class="metric"><span class="meta">失败任务</span><strong>${escapeHtml(totals.failed || 0)}</strong></div>
+                        <div class="metric"><span class="meta">回写成功</span><strong>${escapeHtml(totals.gitlab_comment_success || 0)}</strong></div>
+                        <div class="metric"><span class="meta">回写失败</span><strong>${escapeHtml(totals.gitlab_comment_failed || 0)}</strong></div>
+                        <div class="metric"><span class="meta">经验总数</span><strong>${escapeHtml(totals.knowledge_entries || 0)}</strong></div>
+                        <div class="metric"><span class="meta">启用经验</span><strong>${escapeHtml(totals.active_knowledge_entries || 0)}</strong></div>
+                    </div>
+                    <div class="actions">
+                        <button class="btn-refresh" onclick="fetchDashboard()">刷新</button>
+                        <button class="btn-reject" onclick="switchPanel('history'); showHighRiskReviews();">查看高风险</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>任务分布</h3>
+                    <p class="meta">状态：${renderCountPills(data.status_counts)}</p>
+                    <p class="meta">风险：${renderCountPills(data.risk_counts)}</p>
+                    <p class="meta">项目：${renderCountPills(data.project_counts)}</p>
+                </div>
+                <div class="card">
+                    <h3>最近任务</h3>
+                    ${renderDashboardTasks(latestTasks)}
+                </div>
+                <div class="card">
+                    <h3>失败回写</h3>
+                    ${renderDashboardFailedComments(failedComments)}
+                </div>
+            `;
+        }
+
+        function renderCountPills(counts) {
+            const entries = Object.entries(counts || {});
+            if (entries.length === 0) return '<span class="meta">暂无数据</span>';
+            return entries.map(([key, value]) => `<span class="pill">${escapeHtml(key)}：${escapeHtml(value)}</span>`).join('');
+        }
+
+        function renderDashboardTasks(items) {
+            if (!items || items.length === 0) return '<p class="meta">暂无任务。</p>';
+            return items.map(item => `
+                <div class="record">
+                    <p><strong>MR !${escapeHtml(item.mr_id)}</strong> <span class="status">${escapeHtml(item.status)}</span></p>
+                    <p class="meta">线程：${escapeHtml(item.thread_id)} · 项目：${escapeHtml(item.project_id)} · 风险：${escapeHtml(item.final_risk_level || '-')} · 审批：${escapeHtml(item.approval_decision || '-')}</p>
+                    <div class="actions"><button class="btn-detail" onclick="loadReviewDetail('${escapeHtml(item.thread_id)}')">详情</button></div>
+                    <div id="detail-${escapeHtml(item.thread_id)}" class="detail" style="display:none;"></div>
+                </div>
+            `).join('');
+        }
+
+        function renderDashboardFailedComments(items) {
+            if (!items || items.length === 0) return '<p class="meta">暂无失败回写。</p>';
+            return items.map(item => `
+                <div class="record">
+                    <p class="meta">线程：${escapeHtml(item.thread_id || '-')} · 项目：${escapeHtml(item.project_id)} · MR：${escapeHtml(item.mr_iid)} · 来源：${escapeHtml(item.source)}</p>
+                    ${item.error_message ? `<div class="error">${escapeHtml(item.error_message)}</div>` : ''}
+                    <div class="actions"><button class="btn-retry" onclick="retryGitlabComment('${escapeHtml(item.thread_id)}')">重试评论回写</button></div>
+                </div>
+            `).join('');
         }
 
         async function fetchPending() {
@@ -330,22 +430,77 @@
 
         function renderReviewDetail(detail) {
             const diffSummary = detail.diff_summary || {};
+            const structuredDiffFiles = detail.diff_files || [];
+            const reviewPlans = detail.review_plans || [];
+            const reviewPackages = detail.review_packages || [];
+            const approvalsData = detail.approval_records || [];
+            const commentRecords = detail.gitlab_comment_records || [];
+            const knowledgeData = detail.knowledge_entries || [];
+            const latestApproval = approvalsData[approvalsData.length - 1] || null;
+            const latestComment = commentRecords[commentRecords.length - 1] || null;
+            const failedComment = commentRecords.some(item => item.success === false);
+            const successfulComment = commentRecords.some(item => item.success === true);
             const diffFiles = (diffSummary.files || []).map(item => `
                 <div class="record">
                     <p class="meta">${escapeHtml(item.path)} · +${escapeHtml(item.additions)} · -${escapeHtml(item.deletions)}</p>
                 </div>
             `).join('') || '<p class="meta">暂无变更文件。</p>';
 
+            const overviewBlock = `
+                <div class="summary-grid">
+                    <div class="metric"><span class="meta">状态</span><strong>${escapeHtml(detail.status || '-')}</strong></div>
+                    <div class="metric"><span class="meta">最终风险</span><strong class="risk-${escapeHtml(detail.final_risk_level || '')}">${escapeHtml(detail.final_risk_level || '-')}</strong></div>
+                    <div class="metric"><span class="meta">审批结果</span><strong>${escapeHtml(latestApproval?.decision || detail.approval_decision || '-')}</strong></div>
+                    <div class="metric"><span class="meta">已沉淀经验</span><strong>${escapeHtml(knowledgeData.length)}</strong></div>
+                </div>
+                <p>
+                    <span class="pill ${latestApproval ? 'pill-success' : 'pill-warning'}">${latestApproval ? `审批人：${escapeHtml(latestApproval.operator || '-')}` : '未审批'}</span>
+                    <span class="pill ${successfulComment ? 'pill-success' : failedComment ? 'pill-danger' : 'pill-warning'}">GitLab 回写：${successfulComment ? '成功' : failedComment ? '失败' : '暂无记录'}</span>
+                    ${latestComment ? `<span class="pill">最近回写来源：${escapeHtml(latestComment.source || '-')}</span>` : ''}
+                </p>
+                <div class="detail-toolbar">
+                    <button class="btn-modify" onclick="createKnowledgeFromReview('${escapeHtml(detail.thread_id)}')">沉淀经验</button>
+                    ${failedComment ? `<button class="btn-retry" onclick="retryGitlabComment('${escapeHtml(detail.thread_id)}')">重试评论回写</button>` : ''}
+                </div>
+            `;
+
+            const latestPlan = reviewPlans[reviewPlans.length - 1] || null;
+            const planBlock = latestPlan ? `
+                <div class="record">
+                    <p class="meta">MR 类型：${escapeHtml(latestPlan.mr_type)} · 策略：${escapeHtml(latestPlan.review_strategy)} · 审批策略：${escapeHtml(latestPlan.approval_policy)} · 大 MR：${escapeHtml(latestPlan.is_large_mr)}</p>
+                    <div class="summary-grid">
+                        <div class="metric"><span class="meta">文件数</span><strong>${escapeHtml(latestPlan.file_count)}</strong></div>
+                        <div class="metric"><span class="meta">变更行</span><strong>${escapeHtml(latestPlan.total_changes)}</strong></div>
+                        <div class="metric"><span class="meta">审查包</span><strong>${escapeHtml(latestPlan.package_count)}</strong></div>
+                        <div class="metric"><span class="meta">Agent</span><strong>${escapeHtml((latestPlan.required_agents || []).length)}</strong></div>
+                    </div>
+                    <p>${renderPills(latestPlan.required_agents, 'Agent')}</p>
+                    <p>${renderPills(latestPlan.risk_domains, '风险域')}</p>
+                    ${latestPlan.reason ? `<p>${escapeHtml(latestPlan.reason)}</p>` : ''}
+                </div>
+            ` : '<p class="meta">暂无审查计划。</p>';
+
+            const structuredDiffBlock = structuredDiffFiles.map(item => `
+                <div class="record">
+                    <p><strong>${escapeHtml(item.file_path)}</strong></p>
+                    <p class="meta">类型：${escapeHtml(item.change_type)} · 语言：${escapeHtml(item.language)} · 目录：${escapeHtml(item.directory || '-')} · +${escapeHtml(item.additions)} · -${escapeHtml(item.deletions)} · 总计：${escapeHtml(item.total_changes)}${item.is_large_file ? ' · 大文件' : ''}</p>
+                    <p>${renderPills(item.risk_domains, '风险域')}</p>
+                </div>
+            `).join('') || diffFiles;
+
+            const packagesBlock = reviewPackages.map(packageItem => renderReviewPackage(packageItem, detail.agent_reviews || [])).join('') || '<p class="meta">暂无审查包。</p>';
+
             const agentReviews = (detail.agent_reviews || []).map(item => renderAgentReview(item)).join('') || '<p class="meta">暂无 Agent 审查结果。</p>';
 
-            const approvals = (detail.approval_records || []).map(item => `
+            const approvals = approvalsData.map(item => `
                 <div class="record">
-                    <p class="meta">审批：${escapeHtml(item.decision)} · 已回写：${escapeHtml(item.comment_posted)} · 时间：${escapeHtml(item.decided_at || '-')}</p>
+                    <p class="meta">审批：${escapeHtml(item.decision)} · 操作人：${escapeHtml(item.operator || '-')} · 已回写：${escapeHtml(item.comment_posted)} · 时间：${escapeHtml(item.decided_at || '-')}</p>
+                    ${item.original_comment ? `<details><summary class="meta">查看审批前评论</summary><pre>${escapeHtml(item.original_comment)}</pre></details>` : ''}
                     ${item.modified_comment ? `<pre>${escapeHtml(item.modified_comment)}</pre>` : ''}
                 </div>
             `).join('') || '<p class="meta">暂无审批记录。</p>';
 
-            const comments = (detail.gitlab_comment_records || []).map(item => `
+            const comments = commentRecords.map(item => `
                 <div class="record">
                     <p class="meta">来源：${escapeHtml(item.source)} · 成功：${escapeHtml(item.success)} · 时间：${escapeHtml(item.posted_at || '-')}</p>
                     ${item.error_message ? `<div class="error">${escapeHtml(item.error_message)}</div>` : ''}
@@ -361,7 +516,7 @@
                 </div>
             `).join('') || '<p class="meta">暂无审计日志。</p>';
 
-            const knowledgeEntries = (detail.knowledge_entries || []).map(item => `
+            const knowledgeEntries = knowledgeData.map(item => `
                 <div class="record">
                     <p class="meta">类型：${escapeHtml(item.issue_type)} · 风险：${escapeHtml(item.risk)} · 来源：${escapeHtml(item.source_agent || '-')} · 创建人：${escapeHtml(item.created_by || '-')}</p>
                     ${item.title ? `<strong>${escapeHtml(item.title)}</strong>` : ''}
@@ -371,9 +526,15 @@
             `).join('') || '<p class="meta">暂无历史经验。</p>';
 
             return `
+                <h3>闭环概览</h3>
+                ${overviewBlock}
+                <h3>审查计划</h3>
+                ${planBlock}
+                <h3>审查包</h3>
+                <div class="package-grid">${packagesBlock}</div>
                 <h3>变更摘要</h3>
                 <p class="meta">文件：${escapeHtml(diffSummary.file_count || 0)} · 新增：${escapeHtml(diffSummary.additions || 0)} · 删除：${escapeHtml(diffSummary.deletions || 0)}</p>
-                ${diffFiles}
+                ${structuredDiffBlock}
                 ${diffSummary.preview ? `<pre>${escapeHtml(diffSummary.preview)}</pre>` : ''}
                 <h3>Agent 审查结果</h3>
                 ${agentReviews}
@@ -385,6 +546,41 @@
                 ${knowledgeEntries}
                 <h3>审计日志</h3>
                 ${auditLogs}
+            `;
+        }
+
+        function renderPills(items, emptyText) {
+            if (!items || items.length === 0) return `<span class="meta">暂无${escapeHtml(emptyText || '数据')}</span>`;
+            return items.map(item => `<span class="pill">${escapeHtml(item)}</span>`).join('');
+        }
+
+        function normalizePackageIssues(agentReviews) {
+            return agentReviews.flatMap(review => {
+                const payload = normalizeIssuesPayload(review.issues);
+                return (payload.items || []).map(issue => ({ ...issue, agent: review.agent_name, risk: issue.risk || review.risk }));
+            });
+        }
+
+        function renderReviewPackage(packageItem, agentReviews) {
+            const relatedReviews = (agentReviews || []).filter(review => review.package_id === packageItem.id || review.package_key === packageItem.package_key);
+            const issues = normalizePackageIssues(relatedReviews);
+            const issuePreview = issues.filter(issue => ['HIGH', 'MEDIUM'].includes(String(issue.risk || '').toUpperCase())).slice(0, 5).map(issue => `
+                <li><strong>[${escapeHtml(issue.risk || '-')} · ${escapeHtml(issue.agent || '-')}]</strong> ${escapeHtml(issue.title || issue.description || '未命名问题')}</li>
+            `).join('') || '<li class="meta">暂无高/中风险问题。</li>';
+            const errors = relatedReviews.filter(review => review.error_message).map(review => `
+                <div class="error">${escapeHtml(review.agent_name)}：${escapeHtml(review.error_message)}</div>
+            `).join('');
+            return `
+                <div class="record">
+                    <p><strong>${escapeHtml(packageItem.title || packageItem.package_key)}</strong></p>
+                    <p class="meta">审查包：${escapeHtml(packageItem.package_key)} · 类型：${escapeHtml(packageItem.package_type)} · 优先级：${escapeHtml(packageItem.priority)} · 人工审批：${escapeHtml(packageItem.requires_human)}</p>
+                    <p class="meta">变更：+${escapeHtml(packageItem.additions)} · -${escapeHtml(packageItem.deletions)} · 总计：${escapeHtml(packageItem.total_changes)}</p>
+                    <p>${renderPills(packageItem.selected_agents, 'Agent')}</p>
+                    <p>${renderPills(packageItem.risk_domains, '风险域')}</p>
+                    <p class="meta">文件：${escapeHtml((packageItem.file_paths || []).join(', ') || '-')}</p>
+                    <ul>${issuePreview}</ul>
+                    ${errors}
+                </div>
             `;
         }
 
