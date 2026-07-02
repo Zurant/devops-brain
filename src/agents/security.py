@@ -2,6 +2,10 @@ from src.core.state import ReviewState
 from src.tools.llm_client import call_llm
 from src.agents import parse_agent_json
 from src.agents.knowledge_context import attach_referenced_knowledge, build_agent_knowledge_context
+from src.agents.quality import attach_package_metadata, review_packages_for_agent
+
+
+AGENT_NAME = "security"
 
 PROMPT_TEMPLATE = """
 请作为安全审计专家，检查以下代码是否存在安全漏洞，例如 SQL 注入、XSS、密钥泄露、不安全的依赖等。
@@ -28,13 +32,30 @@ PROMPT_TEMPLATE = """
 """
 
 def security_agent(state: ReviewState):
+    package_reviews = review_packages_for_agent(state, AGENT_NAME)
+    if state.get("review_packages") is not None and not package_reviews:
+        return {"reviews": []}
+    if package_reviews:
+        return {"reviews": [review_package(package) for package in package_reviews]}
+
     diff = state.get("diff_content", "")
-    knowledge_context, knowledge_items = build_agent_knowledge_context(diff, agent_name="security")
+    knowledge_context, knowledge_items = build_agent_knowledge_context(diff, agent_name=AGENT_NAME)
     prompt = PROMPT_TEMPLATE.replace("{knowledge_context}", knowledge_context).replace("{diff_content}", diff)
-    response_text = call_llm(prompt, agent_name="security")
+    response_text = call_llm(prompt, agent_name=AGENT_NAME)
     print("\n--- RAW LLM RESPONSE ---")
     print(response_text)
     print("------------------------\n")
-    result = parse_agent_json(response_text, "security")
+    result = parse_agent_json(response_text, AGENT_NAME)
     attach_referenced_knowledge(result, knowledge_items)
     return {"reviews": [result]}
+
+
+def review_package(package: dict) -> dict:
+    diff = package.get("diff_content", "")
+    knowledge_context, knowledge_items = build_agent_knowledge_context(diff, agent_name=AGENT_NAME)
+    prompt = PROMPT_TEMPLATE.replace("{knowledge_context}", knowledge_context).replace("{diff_content}", diff)
+    response_text = call_llm(prompt, agent_name=AGENT_NAME)
+    result = parse_agent_json(response_text, AGENT_NAME)
+    attach_referenced_knowledge(result, knowledge_items)
+    attach_package_metadata(result, package)
+    return result

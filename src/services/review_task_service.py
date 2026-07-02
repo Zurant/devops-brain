@@ -121,8 +121,12 @@ def replace_agent_reviews(db: Session, task: ReviewTask, reviews: list[dict[str,
         db.add(
             AgentReview(
                 task_id=task.id,
+                package_id=review.get("package_id"),
+                package_key=review.get("package_key"),
                 agent_name=str(review.get("agent", "unknown")),
                 risk=review.get("risk"),
+                file_paths=review.get("file_paths"),
+                risk_domains=review.get("risk_domains"),
                 issues=build_agent_review_issues_payload(review),
                 raw_response=review.get("raw_response"),
                 error_message=review.get("error"),
@@ -580,7 +584,11 @@ def summarize_diff_content(diff_content: str | None) -> dict[str, Any]:
 def serialize_agent_review(review: AgentReview) -> dict[str, Any]:
     return {
         "agent_name": review.agent_name,
+        "package_id": review.package_id,
+        "package_key": review.package_key,
         "risk": review.risk,
+        "file_paths": review.file_paths,
+        "risk_domains": review.risk_domains,
         "issues": review.issues,
         "raw_response": review.raw_response,
         "error_message": review.error_message,

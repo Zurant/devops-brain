@@ -4,7 +4,11 @@ from sqlalchemy.orm import Session
 
 from src.api.globals import pending_reviews
 from src.core.workflow import graph
+from src.services.diff_analyzer import save_diff_analysis
+from src.services.package_review_context import build_package_review_contexts
+from src.services.review_planner import save_review_plan
 from src.services.review_task_service import (
+    get_review_task_by_thread_id,
     mark_task_failed,
     mark_task_running,
     record_gitlab_comment_result,
@@ -24,6 +28,15 @@ def run_review_job(
     mark_task_running(db, thread_id)
 
     try:
+        task = get_review_task_by_thread_id(db, thread_id)
+        if task is not None:
+            save_diff_analysis(db, task, initial_state.get("diff_content", ""))
+            save_review_plan(db, task)
+            initial_state = {
+                **initial_state,
+                "review_packages": build_package_review_contexts(db, task, initial_state.get("diff_content", "")),
+            }
+
         graph.invoke(initial_state, config=config)
         state = graph.get_state(config)
         current_values = state.values

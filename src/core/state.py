@@ -14,6 +14,7 @@ class ReviewState(TypedDict):
     project_id: str
     diff_content: str
     mr_url: str              # MR 的 web URL，方便审批页面跳转
+    review_packages: List[Dict[str, Any]]
     
     # 2. 专家 Agent 并行输出
     # 使用 Annotated 允许 Quality/Security/Architecture Agent 并行写入而不会互相覆盖

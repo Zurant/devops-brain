@@ -536,6 +536,9 @@
 
         function renderAgentReview(item) {
             const payload = normalizeIssuesPayload(item.issues);
+            const packageInfo = item.package_key
+                ? `<p class="meta">审查包：${escapeHtml(item.package_key)} · 文件：${escapeHtml((item.file_paths || []).join(', ') || '-')} · 风险域：${escapeHtml((item.risk_domains || []).join(', ') || '-')}</p>`
+                : '';
             const knowledge = payload.referencedKnowledge.map(knowledgeItem => `
                 <div class="record">
                     <p><strong>${escapeHtml(knowledgeItem.title || '未命名经验')}</strong></p>
@@ -547,6 +550,7 @@
             return `
                 <div class="record">
                     <p class="meta">Agent：${escapeHtml(item.agent_name)} · 风险：${escapeHtml(item.risk || '-')} · 模型：${escapeHtml(item.model_name || '-')}</p>
+                    ${packageInfo}
                     ${item.error_message ? `<div class="error">${escapeHtml(item.error_message)}</div>` : ''}
                     <pre>${escapeHtml(JSON.stringify(payload.items, null, 2))}</pre>
                     <h4>引用历史经验</h4>

@@ -15,8 +15,12 @@ class AgentReview(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     task_id: Mapped[int] = mapped_column(ForeignKey("review_tasks.id", ondelete="CASCADE"), index=True, nullable=False)
+    package_id: Mapped[int | None] = mapped_column(ForeignKey("review_packages.id", ondelete="SET NULL"), index=True)
+    package_key: Mapped[str | None] = mapped_column(String(255), index=True)
     agent_name: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     risk: Mapped[str | None] = mapped_column(String(16), index=True)
+    file_paths: Mapped[list[str] | None] = mapped_column(PortableJSONB)
+    risk_domains: Mapped[list[str] | None] = mapped_column(PortableJSONB)
     issues: Mapped[list[dict[str, Any]] | None] = mapped_column(PortableJSONB)
     raw_response: Mapped[str | None] = mapped_column(Text)
     error_message: Mapped[str | None] = mapped_column(Text)
@@ -26,3 +30,4 @@ class AgentReview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     task = relationship("ReviewTask", back_populates="agent_reviews")
+    package = relationship("ReviewPackage")

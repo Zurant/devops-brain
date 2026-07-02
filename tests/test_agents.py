@@ -15,6 +15,22 @@ def mock_call_llm_success(prompt: str, agent_name: str, model: str = None) -> st
     }
     return f"```json\n{json.dumps(mock_res)}\n```"
 
+
+def build_package(**overrides):
+    package = {
+        "package_id": 7,
+        "package_key": "risk_domain:database",
+        "package_type": "risk_domain",
+        "title": "database 风险域审查包",
+        "risk_domains": ["database"],
+        "file_paths": ["src/api.py"],
+        "selected_agents": ["architecture", "quality"],
+        "requires_human": True,
+        "diff_content": "# File: src/api.py\n+cursor.execute(sql)",
+    }
+    package.update(overrides)
+    return package
+
 def mock_call_llm_fail(prompt: str, agent_name: str, model: str = None) -> str:
     """模拟大模型返回无效的乱码"""
     return "This is not a JSON, sorry!"
@@ -129,3 +145,45 @@ def test_summary_agent_prompt_includes_referenced_knowledge(mock_llm):
     assert "referenced_knowledge" in prompt
     assert "历史 SQL 注入修复经验" in prompt
     assert "历史经验参考" in prompt
+
+
+@patch("src.agents.knowledge_context.retrieve_relevant_knowledge", return_value=[])
+@patch("src.agents.quality.call_llm", side_effect=mock_call_llm_success)
+def test_quality_agent_reviews_selected_packages(mock_llm, mock_knowledge):
+    state = {"diff_content": "whole diff", "review_packages": [build_package()]}
+
+    res = quality_agent(state)
+
+    assert len(res["reviews"]) == 1
+    review = res["reviews"][0]
+    assert review["agent"] == "quality"
+    assert review["package_id"] == 7
+    assert review["package_key"] == "risk_domain:database"
+    assert review["file_paths"] == ["src/api.py"]
+    prompt = mock_llm.call_args.args[0]
+    assert "# File: src/api.py" in prompt
+    assert "whole diff" not in prompt
+
+
+@patch("src.agents.security.call_llm", side_effect=mock_call_llm_success)
+def test_security_agent_skips_when_package_not_selected(mock_llm):
+    state = {"diff_content": "whole diff", "review_packages": [build_package()]}
+
+    res = security_agent(state)
+
+    assert res == {"reviews": []}
+    mock_llm.assert_not_called()
+
+
+@patch("src.agents.knowledge_context.retrieve_relevant_knowledge", return_value=[])
+@patch("src.agents.architecture.call_llm", side_effect=mock_call_llm_success)
+def test_architecture_agent_reviews_package_diff(mock_llm, mock_knowledge):
+    state = {"diff_content": "whole diff", "review_packages": [build_package()]}
+
+    res = architecture_agent(state)
+
+    assert res["reviews"][0]["agent"] == "architecture"
+    assert res["reviews"][0]["package_key"] == "risk_domain:database"
+    prompt = mock_llm.call_args.args[0]
+    assert "cursor.execute" in prompt
+    assert "whole diff" not in prompt
